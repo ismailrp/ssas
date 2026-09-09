@@ -46,6 +46,7 @@ if ([string]::IsNullOrEmpty($EvidenceRoot)) {
 }
 $script:StartedUtc = [DateTime]::UtcNow
 $script:Rows = New-Object System.Collections.Generic.List[object]
+$script:RefreshPoliciesUnsupported = $false
 
 function Write-Log([string]$Message) {
     Write-Host ('[{0}] {1}' -f [DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'), $Message)
@@ -199,6 +200,11 @@ function Export-AdomdQuery {
         Write-Log ('{0} / {1}: EXISTING - skipped' -f $Database, $Artifact)
         return
     }
+    if (($Artifact -eq 'refresh_policies') -and $script:RefreshPoliciesUnsupported) {
+        Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'QUERY_FAILED_OR_UNSUPPORTED' $absolutePath 0 'UNSUPPORTED: server tidak mengenal TMSCHEMA_REFRESH_POLICIES.'
+        Write-Log ('{0} / {1}: UNSUPPORTED - skipped without retry' -f $Database, $Artifact)
+        return
+    }
     if ($WhatIf) {
         Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'WHATIF' $absolutePath 0 ''
         return
@@ -210,8 +216,15 @@ function Export-AdomdQuery {
         Write-Log ('{0} / {1}: SUCCESS ({2} rows)' -f $Database, $Artifact, $rowCount)
     } catch {
         $message = $_.Exception.Message
+        if (($Artifact -eq 'refresh_policies') -and ($message -match '(?i)request type.*not recognized|not recognized.*request type')) {
+            $script:RefreshPoliciesUnsupported = $true
+            $message = 'UNSUPPORTED: server tidak mengenal TMSCHEMA_REFRESH_POLICIES. ' + $message
+            Write-Log ('{0} / {1}: UNSUPPORTED' -f $Database, $Artifact)
+        }
         Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'QUERY_FAILED_OR_UNSUPPORTED' $absolutePath 0 $message
-        Write-Warning ('{0} / {1}: {2}' -f $Database, $Artifact, $message)
+        if ($message -notlike 'UNSUPPORTED:*') {
+            Write-Warning ('{0} / {1}: {2}' -f $Database, $Artifact, $message)
+        }
     } finally { }
 }
 
