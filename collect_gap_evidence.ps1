@@ -46,8 +46,6 @@ if ([string]::IsNullOrEmpty($EvidenceRoot)) {
 }
 $script:StartedUtc = [DateTime]::UtcNow
 $script:Rows = New-Object System.Collections.Generic.List[object]
-$script:AdomdConnectionType = $null
-$script:AdomdCommandType = $null
 
 function Write-Log([string]$Message) {
     Write-Host ('[{0}] {1}' -f [DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'), $Message)
@@ -133,23 +131,19 @@ function Initialize-Adomd([string]$RequestedPath) {
     if ($null -eq $loadedAmo) {
         throw 'Microsoft.AnalysisServices tidak dapat di-load sebagai dependency ADOMD.NET.'
     }
-    # Resolve types from the assembly object already loaded above. Using
-    # [Type]::GetType('type, assembly-name') can trigger a second bind and
-    # fail on servers where the ADOMD assembly has a version/public-key name
-    # that differs from the simple assembly name.
-    $script:AdomdConnectionType = $loadedAdomd.GetType('Microsoft.AnalysisServices.AdomdClient.AdomdConnection', $true)
-    $script:AdomdCommandType = $loadedAdomd.GetType('Microsoft.AnalysisServices.AdomdClient.AdomdCommand', $true)
     Write-Log ('Loaded: {0}' -f $loadedAdomd.FullName)
     Write-Log ('Loaded: {0}' -f $loadedAmo.FullName)
 }
 
 function New-AdomdConnection([string]$Database) {
-    $connection = [Activator]::CreateInstance($script:AdomdConnectionType)
     if ([string]::IsNullOrEmpty($Database)) {
-        $connection.ConnectionString = 'Data Source={0};Integrated Security=SSPI;Timeout=300;' -f $Server
+        $connectionString = 'Data Source={0};Integrated Security=SSPI;Timeout=300;' -f $Server
     } else {
-        $connection.ConnectionString = 'Data Source={0};Initial Catalog={1};Integrated Security=SSPI;Timeout=300;' -f $Server, $Database
+        $connectionString = 'Data Source={0};Initial Catalog={1};Integrated Security=SSPI;Timeout=300;' -f $Server, $Database
     }
+    # Direct construction matches the known-good Collect-SSAS.ps1 pattern and
+    # avoids a second assembly bind through reflection.
+    $connection = New-Object Microsoft.AnalysisServices.AdomdClient.AdomdConnection($connectionString)
     return $connection
 }
 
