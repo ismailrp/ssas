@@ -1,0 +1,48 @@
+<!--
+  MULTIDIMENSIONAL - Create persistent XEvent trace session
+  Run this via SSMS: connect to the Multidimensional instance (Analysis Services),
+  New Query > MDX/XMLA, paste and execute.
+
+  Captures: total query duration, subcube (storage) fetch, aggregation vs
+  cache hit, calculation time, and result serialization time.
+  No ActivityID equivalent exists here — correlation is done later via
+  ConnectionID + SPID + timestamp window.
+-->
+<Create xmlns="http://schemas.microsoft.com/analysisservices/2003/engine">
+  <ObjectDefinition>
+    <Trace>
+      <ID>ProdMD_Monitor</ID>
+      <Name>ProdMD_Monitor</Name>
+      <AutoRestart>true</AutoRestart>
+      <XEvent>
+        <event_session name="ProdMD_Monitor" xmlns="http://schemas.microsoft.com/analysisservices/2003/engine">
+          <event package="AS" name="QueryBegin"/>
+          <event package="AS" name="QueryEnd"/>
+          <event package="AS" name="QuerySubcubeBegin"/>
+          <event package="AS" name="QuerySubcubeEnd"/>
+          <event package="AS" name="GetDataFromAggregation"/>
+          <event package="AS" name="GetDataFromCache"/>
+          <event package="AS" name="CalculateNonEmptyBegin"/>
+          <event package="AS" name="CalculateNonEmptyEnd"/>
+          <event package="AS" name="SerializeResultsBegin"/>
+          <event package="AS" name="SerializeResultsEnd"/>
+          <event package="AS" name="Error"/>
+          <target package="Package0" name="event_file">
+            <parameter name="filename" value="D:\OLAP\Log\ProdMD_Monitor"/>
+            <parameter name="max_file_size" value="100"/>
+            <parameter name="max_rollover_files" value="200"/>
+          </target>
+        </event_session>
+      </XEvent>
+    </Trace>
+  </ObjectDefinition>
+</Create>
+
+<!--
+  ~~ To stop/remove later ~~
+  <Delete xmlns="http://schemas.microsoft.com/analysisservices/2003/engine">
+    <Object>
+      <TraceID>ProdMD_Monitor</TraceID>
+    </Object>
+  </Delete>
+-->

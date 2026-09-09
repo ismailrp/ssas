@@ -33,7 +33,13 @@ W04 >5menit Fail
 
 Premi Lembur monitoring
 W04 Fail memory error
-
+jalankan collect gap evidence 
+  powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File "C:\Tools\collect_gap_evidence.ps1" `
+    -EvidenceRoot "C:\Tools\evidence\EVSET-001" `
+    -SourceMapPath "C:\Tools\source-map.csv" `
+    -SqlServer "NamaServerSQL\NamaInstance" `
+    -SkipRuntimeSnapshot
 
 # 1. Kriteria Gaji
 powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
