@@ -133,8 +133,12 @@ function Initialize-Adomd([string]$RequestedPath) {
     if ($null -eq $loadedAmo) {
         throw 'Microsoft.AnalysisServices tidak dapat di-load sebagai dependency ADOMD.NET.'
     }
-    $script:AdomdConnectionType = [Type]::GetType('Microsoft.AnalysisServices.AdomdClient.AdomdConnection, Microsoft.AnalysisServices.AdomdClient', $true)
-    $script:AdomdCommandType = [Type]::GetType('Microsoft.AnalysisServices.AdomdClient.AdomdCommand, Microsoft.AnalysisServices.AdomdClient', $true)
+    # Resolve types from the assembly object already loaded above. Using
+    # [Type]::GetType('type, assembly-name') can trigger a second bind and
+    # fail on servers where the ADOMD assembly has a version/public-key name
+    # that differs from the simple assembly name.
+    $script:AdomdConnectionType = $loadedAdomd.GetType('Microsoft.AnalysisServices.AdomdClient.AdomdConnection', $true)
+    $script:AdomdCommandType = $loadedAdomd.GetType('Microsoft.AnalysisServices.AdomdClient.AdomdCommand', $true)
     Write-Log ('Loaded: {0}' -f $loadedAdomd.FullName)
     Write-Log ('Loaded: {0}' -f $loadedAmo.FullName)
 }
