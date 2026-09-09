@@ -24,7 +24,7 @@ param(
     [switch]$SkipRuntimeSnapshot,
     [string]$SourceMapPath = '',
     [string]$SqlServer = '',
-    [switch]$SkipExisting,
+    [switch]$Force,
     [switch]$WhatIf
 )
 
@@ -195,8 +195,8 @@ function Export-AdomdQuery {
     param([string]$Database, [string]$Artifact, [string]$RelativePath, [string]$Query)
     $absolutePath = Join-Path (Join-Path $EvidenceRoot 'TABULAR') (Join-Path (SafeName $Database) $RelativePath)
     Ensure-Directory (Split-Path -Parent $absolutePath)
-    if ($SkipExisting -and (Test-Path -LiteralPath $absolutePath)) {
-        Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'SKIPPED' $absolutePath 0 'File already exists; use without -SkipExisting to recollect.'
+    if ((-not $Force) -and (Test-Path -LiteralPath $absolutePath)) {
+        Write-Log ('{0} / {1}: EXISTING - skipped' -f $Database, $Artifact)
         return
     }
     if ($WhatIf) {
@@ -220,6 +220,10 @@ function Export-RuntimeQuery {
     $runtimeRoot = Join-Path (Join-Path $EvidenceRoot 'SERVER_RUNTIME') (SafeName $Server)
     Ensure-Directory $runtimeRoot
     $path = Join-Path $runtimeRoot $FileName
+    if ((-not $Force) -and (Test-Path -LiteralPath $path)) {
+        Write-Log ('SERVER / {0}: EXISTING - skipped' -f $Artifact)
+        return
+    }
     if ($WhatIf) { Add-ManifestRow $Server '' 'SERVER' $Artifact 'WHATIF' $path 0 ''; return }
     try {
         $table = Invoke-AdomdTable '' $Query
@@ -263,7 +267,9 @@ foreach ($database in $databases) {
         Export-AdomdQuery $database.Database $item.Artifact $item.RelativePath $item.Query
     }
     $metadata = Join-Path (Join-Path (Join-Path $EvidenceRoot 'TABULAR') (SafeName $database.Database)) 'collection_metadata.json'
-    if (-not $WhatIf) {
+    if ((-not $Force) -and (Test-Path -LiteralPath $metadata)) {
+        Write-Log ('{0} / collection_metadata.json: EXISTING - skipped' -f $database.Database)
+    } elseif (-not $WhatIf) {
         [pscustomobject]@{
             Server = $Server; Database = $database.Database; ServerType = 'TABULAR'
             CollectedUtc = [DateTime]::UtcNow.ToString('o'); PowerShellVersion = $PSVersionTable.PSVersion.ToString()
@@ -294,6 +300,10 @@ if ($SourceMapPath) {
         )
         foreach ($sql in $sqlQueries) {
             $path = Join-Path $sourceDir $sql.File
+            if ((-not $Force) -and (Test-Path -LiteralPath $path)) {
+                Write-Log ('{0} / {1}: EXISTING - skipped' -f $source.Database, $sql.Artifact)
+                continue
+            }
             try {
                 $cs = 'Data Source={0};Initial Catalog={1};Integrated Security=True;Application Name=SSAS gap evidence;' -f $SqlServer, $source.SourceDatabase
                 $conn = New-Object System.Data.SqlClient.SqlConnection $cs; $conn.Open()
