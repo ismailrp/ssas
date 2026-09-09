@@ -1,0 +1,146 @@
+1. Produksi TBS
+2. LKK
+3. Sparta_LHA_ENHC
+4. Premi dan Lembur Monitoring
+5. MRData
+
+6. LKKPhase2
+7. LemburMill
+8. Harvesting Management Luas Resume
+9. Weekly Cost Element Estimation
+10. MUTU_BUAH
+
+11. JournalPayroll
+12. Premi Panen
+13. KriteriaGaji
+14. Actual vs Anggaran
+
+BGASVR-DWH-DEV\SQLTABULAR
+
+cek lagi FACT dan dimensionnya masing-masing
+
+LKK
+W03 30 detik
+W04 60 detik
+
+SPARTA_LHA_ENHC
+W03 30 detik
+W04 >7 menit -> cancel
+
+MRData
+W03 4 menit
+W04 >5menit Fail
+
+Premi Lembur monitoring
+W04 Fail memory error
+
+
+# 1. Kriteria Gaji
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\KriteriaGaji_Runtime_20260904.csv" `
+  -OutputDir ".\output\Kriteria Gaji" `
+  -Database "Kriteria Gaji" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 2. Lembur Mill
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\LemburMill_Runtime_20260904.csv" `
+  -OutputDir ".\output\Lembur Mill" `
+  -Database "Lembur Mill" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 3. LKK
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\LKK_Runtime.csv" `
+  -OutputDir ".\output\LKK" `
+  -Database "LKK" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 4. LKK Phase 2
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\LKKPhase2_Runtime_20260904.csv" `
+  -OutputDir ".\output\LKK Phase 2" `
+  -Database "LKK Phase 2" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 5. MRDATA
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\MRDATA_Runtime_20260904.csv" `
+  -OutputDir ".\output\MRDATA" `
+  -Database "MRDATA" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 6. Mutu Buah
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\Mutu_Buah_Runtime_20260904.csv" `
+  -OutputDir ".\output\Mutu Buah" `
+  -Database "Mutu Buah" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 7. Premi Lembur Monitoring
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\Premi_Lembur_monitoring_Runtime_20260904.csv" `
+  -OutputDir ".\output\Premi Lembur Monitoring" `
+  -Database "Premi Lembur Monitoring" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 8. Premi Panen
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\PremiPanen_Runtime_20260904.csv" `
+  -OutputDir ".\output\Premi Panen" `
+  -Database "Premi Panen" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 9. Produksi TBS
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\ProduksiTBS_Runtime_20260904.csv" `
+  -OutputDir ".\output\Produksi TBS" `
+  -Database "Produksi TBS" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 10. SPARTA LHA ENHC
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\SPARTA_LHA_ENHC_Runtime_20260904.csv" `
+  -OutputDir ".\output\SPARTA LHA ENHC" `
+  -Database "SPARTA LHA ENHC" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 11. Weekly Cost Element Estimation
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\Weekly_Cost_Element_Estimation_Runtime_20260904.csv" `
+  -OutputDir ".\output\Weekly Cost Element Estimation" `
+  -Database "Weekly Cost Element Estimation" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 12. Jurnal Payroll
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\ActualVsAnggaran_Runtime_20260904.csv " `
+  -OutputDir ".\output\Actual vs Anggaran" `
+  -Database "Actual vs Anggaran" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+# 13. Jurnal Payroll
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\JurnalPayroll_Runtime_20260904.csv" `
+  -OutputDir ".\output\Jurnal Payroll" `
+  -Database "Jurnal Payroll" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt
+
+
+# 14. Harvesting Management Luas Resume
+powershell -ExecutionPolicy Bypass -File .\scripts\Analyze-SSASRuntimeEvidence.ps1 `
+  -InputCsv ".\input\HarvestingManagementLuasResume_Runtime_20260904.csv" `
+  -OutputDir ".\output\Harvesting Management Luas Resume" `
+  -Database "Harvesting Management Luas Resume" `
+  -WorkloadType CONTROLLED *>&1 | Out-File error.txt

@@ -1,0 +1,36 @@
+{
+  "assessment_id": "EVSET-001",
+  "output_root": ".\\evidence",
+  "servers": [
+    {
+      "name": "BGASVR-DWH-DEV\\SQLTABULAR",
+      "type": "TABULAR",
+      "databases": [
+        "*"
+      ],
+      "exclude_databases": []
+    },
+    {
+      "name": "BGASVR-DWH-DEV\\SQLMULTIDIM",
+      "type": "MULTIDIMENSIONAL",
+      "databases": [
+        "*"
+      ],
+      "exclude_databases": []
+    }
+  ],
+  "collect": {
+    "server_inventory": true,
+    "server_runtime": true,
+    "database_metadata": true,
+    "database_storage": true,
+    "tabular_tmsl": true,
+    "server_memory_usage": false,
+    "database_object_memory_usage": false
+  },
+  "compatibility": {
+    "minimum_powershell": "4.0",
+    "require_sqlserver_module": false
+  },
+  "query_timeout_seconds": 60
+}

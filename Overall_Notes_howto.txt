@@ -1,0 +1,17 @@
+
+1. tujuan menghasilkan evidence. Jalankan di PS (as admin)
+./Collect-SSAS
+result di folder evidence
+2. jalankan build_assessment.ps1 untuk generate report 
+atau markdown ai agent SSAS Performance....md
+dari report pilih database yang potensial check
+3. collect XEvents runtime untuk database yang dipilih
+ - buat session di ssms, script xmla
+ - buat report dummy dengan load sesuai panduan_tesExcel.txt
+ - hasil xel buka di ssms export ke csv
+4. Jalankan scripts/Analyze-SSASRuntimeEvidence.ps1
+dapat QRY-001..005
+5. Jalankan QRY-001..005 di DAX Studio + Server Timings
+6. Isi FE/SE template
+7. Build-SSASRuntimeReport.ps1
+8. Gabungkan dengan static assesment

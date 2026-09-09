@@ -1,0 +1,48 @@
+<Execute xmlns="urn:schemas-microsoft-com:xml-analysis">
+  <Command>
+    <Batch xmlns="http://schemas.microsoft.com/analysisservices/2003/engine">
+      <Create>
+        <ObjectDefinition>
+          <Trace>
+            <ID>ProduksiTBS_Runtime_Test</ID>
+            <Name>ProduksiTBS_Runtime_Test</Name>
+
+            <ddl300_300:XEvent
+              xmlns:ddl300_300="http://schemas.microsoft.com/analysisservices/2011/engine/300/300">
+
+              <event_session
+                name="ProduksiTBS_Runtime_Test"
+                dispatchLatency="1"
+                maxEventSize="4"
+                maxMemory="8"
+                memoryPartitionMode="none"
+                eventRetentionMode="allowSingleEventLoss"
+                trackCausality="true">
+
+                <event package="AS" name="QueryBegin" />
+                <event package="AS" name="QueryEnd" />
+                <event package="AS" name="ResourceUsage" />
+
+                <target package="package0"
+                        name="event_file">
+                  <parameter
+                    name="filename"
+                    value="E:\SSAS_XEvents\ProduksiTBS_Runtime_Test.xel" />
+                  <parameter
+                    name="max_file_size"
+                    value="100" />
+                  <parameter
+                    name="max_rollover_files"
+                    value="5" />
+                </target>
+
+              </event_session>
+
+            </ddl300_300:XEvent>
+          </Trace>
+        </ObjectDefinition>
+      </Create>
+    </Batch>
+  </Command>
+  <Properties />
+</Execute>

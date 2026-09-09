@@ -1,0 +1,12 @@
+<Execute xmlns="urn:schemas-microsoft-com:xml-analysis">
+  <Command>
+    <Batch xmlns="http://schemas.microsoft.com/analysisservices/2003/engine">
+      <Delete>
+        <Object>
+          <TraceID>__SESSION_NAME__</TraceID>
+        </Object>
+      </Delete>
+    </Batch>
+  </Command>
+  <Properties />
+</Execute>

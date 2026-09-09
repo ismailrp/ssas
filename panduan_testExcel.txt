@@ -1,0 +1,6 @@
+﻿| Tahap          | Yang dilakukan                                   |
+| -------------- | ------------------------------------------------ |
+| W01 Baseline   | 1 measure + Date/Year                            |
+| W02 Measures   | 3–5 measure + Date/Year                          |
+| W03 Dimensions | W02 + 1 dimension bisnis, mis. Plant/Region/Unit |
+| W04 Heavy      | 5–10 measure + Date + 2 dimension bisnis         |
