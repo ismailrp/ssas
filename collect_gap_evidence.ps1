@@ -18,7 +18,7 @@
 [CmdletBinding()]
 param(
     [string]$Server = 'BGASVR-DWH-DEV\SQLTABULAR',
-    [string]$EvidenceRoot = (Join-Path $PSScriptRoot 'evidence\EVSET-001'),
+    [string]$EvidenceRoot = '',
     [string]$DatabaseListPath = '',
     [string]$AdomdClientPath = '',
     [switch]$SkipRuntimeSnapshot,
@@ -32,6 +32,17 @@ $ErrorActionPreference = 'Stop'
 $minimumPowerShell = New-Object Version 4,0
 if ($PSVersionTable.PSVersion -lt $minimumPowerShell) {
     throw ('PowerShell 4.0 atau lebih baru diperlukan. Versi aktif: {0}' -f $PSVersionTable.PSVersion)
+}
+
+# Do not use Join-Path in the parameter default. On some PowerShell 4.0
+# invocation methods $PSScriptRoot is empty while defaults are evaluated.
+# Resolve the script directory after param binding instead.
+$scriptPath = $MyInvocation.MyCommand.Path
+$scriptDirectory = $null
+if ($scriptPath) { $scriptDirectory = Split-Path -Parent $scriptPath }
+if (-not $scriptDirectory) { $scriptDirectory = (Get-Location).Path }
+if ([string]::IsNullOrEmpty($EvidenceRoot)) {
+    $EvidenceRoot = Join-Path $scriptDirectory 'evidence\EVSET-001'
 }
 $script:StartedUtc = [DateTime]::UtcNow
 $script:Rows = New-Object System.Collections.Generic.List[object]
