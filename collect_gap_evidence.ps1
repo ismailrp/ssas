@@ -94,11 +94,38 @@ function Find-AdomdAssembly([string]$RequestedPath) {
 }
 
 function Initialize-Adomd([string]$RequestedPath) {
-    $path = Find-AdomdAssembly $RequestedPath
-    if ($path) { Add-Type -Path $path -ErrorAction Stop }
+    # Match the proven loading method in Collect-SSAS.ps1. Add-Type -Path can
+    # fail when ADOMD has companion assemblies in the GAC/private probing path.
+    # If a DLL path is supplied, add its directory to PATH before partial-name
+    # loading so its dependent assemblies can be resolved as well.
+    $requestedFullPath = $null
+    $requestedDirectory = $null
+    if ($RequestedPath) {
+        $requestedFullPath = (Resolve-Path -LiteralPath $RequestedPath -ErrorAction Stop).Path
+        $requestedDirectory = Split-Path -Parent $requestedFullPath
+        if ($env:Path -notlike "*$requestedDirectory*") {
+            $env:Path = $requestedDirectory + ';' + $env:Path
+        }
+    }
+    $loadedAdomd = [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.AnalysisServices.AdomdClient')
+    if (($null -eq $loadedAdomd) -and $requestedFullPath) {
+        $loadedAdomd = [System.Reflection.Assembly]::LoadFrom($requestedFullPath)
+    }
+    $loadedAmo = [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.AnalysisServices')
+    if (($null -eq $loadedAmo) -and $requestedDirectory) {
+        $amoPath = Join-Path $requestedDirectory 'Microsoft.AnalysisServices.dll'
+        if (Test-Path -LiteralPath $amoPath) { $loadedAmo = [System.Reflection.Assembly]::LoadFrom($amoPath) }
+    }
+    if ($null -eq $loadedAdomd) {
+        throw 'Microsoft.AnalysisServices.AdomdClient tidak dapat di-load. Pastikan SSMS/SSDT atau SSAS client components terpasang.'
+    }
+    if ($null -eq $loadedAmo) {
+        throw 'Microsoft.AnalysisServices tidak dapat di-load sebagai dependency ADOMD.NET.'
+    }
     $script:AdomdConnectionType = [Type]::GetType('Microsoft.AnalysisServices.AdomdClient.AdomdConnection, Microsoft.AnalysisServices.AdomdClient', $true)
     $script:AdomdCommandType = [Type]::GetType('Microsoft.AnalysisServices.AdomdClient.AdomdCommand, Microsoft.AnalysisServices.AdomdClient', $true)
-    Write-Log ('ADOMD.NET loaded: {0}' -f $path)
+    Write-Log ('Loaded: {0}' -f $loadedAdomd.FullName)
+    Write-Log ('Loaded: {0}' -f $loadedAmo.FullName)
 }
 
 function New-AdomdConnection([string]$Database) {
@@ -109,6 +136,50 @@ function New-AdomdConnection([string]$Database) {
         $connection.ConnectionString = 'Data Source={0};Initial Catalog={1};Integrated Security=SSPI;Timeout=300;' -f $Server, $Database
     }
     return $connection
+}
+
+function Export-DataTableCsv {
+    param([System.Data.DataTable]$Table, [string]$Path)
+    if ($null -eq $Table) {
+        '' | Set-Content -LiteralPath $Path -Encoding UTF8
+        return 0
+    }
+    if ($Table.Rows.Count -eq 0) {
+        $headers = @()
+        foreach ($column in $Table.Columns) {
+            $headers += ('"' + ([string]$column.ColumnName).Replace('"','""') + '"')
+        }
+        if ($headers.Count -gt 0) { ($headers -join ',') | Set-Content -LiteralPath $Path -Encoding UTF8 }
+        else { '' | Set-Content -LiteralPath $Path -Encoding UTF8 }
+        return 0
+    }
+    $objects = foreach ($row in $Table.Rows) {
+        $object = New-Object PSObject
+        foreach ($column in $Table.Columns) {
+            Add-Member -InputObject $object -MemberType NoteProperty -Name $column.ColumnName -Value $row[$column.ColumnName]
+        }
+        $object
+    }
+    @($objects) | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
+    return $Table.Rows.Count
+}
+
+function Invoke-AdomdTable([string]$Database, [string]$Query) {
+    $connection = $null
+    try {
+        $connection = New-AdomdConnection $Database
+        $connection.Open()
+        $command = $connection.CreateCommand()
+        $command.CommandText = $Query
+        try { $command.CommandTimeout = 300 } catch { }
+        $adapter = New-Object Microsoft.AnalysisServices.AdomdClient.AdomdDataAdapter($command)
+        $dataSet = New-Object System.Data.DataSet
+        [void]$adapter.Fill($dataSet)
+        if (($null -eq $dataSet) -or ($dataSet.Tables.Count -eq 0)) { return $null }
+        Write-Output -NoEnumerate $dataSet.Tables[0]
+    } finally {
+        if ($connection) { try { $connection.Close() } catch { }; try { $connection.Dispose() } catch { } }
+    }
 }
 
 function Export-AdomdQuery {
@@ -123,29 +194,16 @@ function Export-AdomdQuery {
         Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'WHATIF' $absolutePath 0 ''
         return
     }
-    $connection = $null
-    $reader = $null
     try {
-        $connection = New-AdomdConnection $Database
-        $connection.Open()
-        $command = [Activator]::CreateInstance($script:AdomdCommandType)
-        $command.Connection = $connection
-        $command.CommandText = $Query
-        $command.CommandTimeout = 300
-        $reader = $command.ExecuteReader()
-        $table = New-Object System.Data.DataTable
-        $table.Load($reader)
-        $table | Export-Csv -LiteralPath $absolutePath -NoTypeInformation -Encoding UTF8
-        Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'SUCCESS' $absolutePath $table.Rows.Count ''
-        Write-Log ('{0} / {1}: SUCCESS ({2} rows)' -f $Database, $Artifact, $table.Rows.Count)
+        $table = Invoke-AdomdTable $Database $Query
+        $rowCount = Export-DataTableCsv $table $absolutePath
+        Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'SUCCESS' $absolutePath $rowCount ''
+        Write-Log ('{0} / {1}: SUCCESS ({2} rows)' -f $Database, $Artifact, $rowCount)
     } catch {
         $message = $_.Exception.Message
         Add-ManifestRow $Server $Database 'TABULAR' $Artifact 'QUERY_FAILED_OR_UNSUPPORTED' $absolutePath 0 $message
         Write-Warning ('{0} / {1}: {2}' -f $Database, $Artifact, $message)
-    } finally {
-        if ($reader) { $reader.Dispose() }
-        if ($connection) { $connection.Dispose() }
-    }
+    } finally { }
 }
 
 function Export-RuntimeQuery {
@@ -154,23 +212,15 @@ function Export-RuntimeQuery {
     Ensure-Directory $runtimeRoot
     $path = Join-Path $runtimeRoot $FileName
     if ($WhatIf) { Add-ManifestRow $Server '' 'SERVER' $Artifact 'WHATIF' $path 0 ''; return }
-    $connection = $null; $reader = $null
     try {
-        $connection = New-AdomdConnection ''
-        $connection.Open()
-        $command = [Activator]::CreateInstance($script:AdomdCommandType)
-        $command.Connection = $connection; $command.CommandText = $Query; $command.CommandTimeout = 300
-        $reader = $command.ExecuteReader()
-        $table = New-Object System.Data.DataTable; $table.Load($reader)
-        $table | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding UTF8
-        Add-ManifestRow $Server '' 'SERVER' $Artifact 'SUCCESS' $path $table.Rows.Count ''
-        Write-Log ('SERVER / {0}: SUCCESS ({1} rows)' -f $Artifact, $table.Rows.Count)
+        $table = Invoke-AdomdTable '' $Query
+        $rowCount = Export-DataTableCsv $table $path
+        Add-ManifestRow $Server '' 'SERVER' $Artifact 'SUCCESS' $path $rowCount ''
+        Write-Log ('SERVER / {0}: SUCCESS ({1} rows)' -f $Artifact, $rowCount)
     } catch {
         Add-ManifestRow $Server '' 'SERVER' $Artifact 'QUERY_FAILED_OR_UNSUPPORTED' $path 0 $_.Exception.Message
         Write-Warning ('SERVER / {0}: {1}' -f $Artifact, $_.Exception.Message)
-    } finally {
-        if ($reader) { $reader.Dispose() }; if ($connection) { $connection.Dispose() }
-    }
+    } finally { }
 }
 
 function Get-DatabaseList([string]$Path) {
