@@ -31,6 +31,8 @@ Evidence dapat berisi nama server, query partition, DAX, role, dan metadata sens
   - `BGASVR-DWH-DEV\SQLTABULAR` sebagai Analysis Services;
   - `BGASVR-DWH-DEV` sebagai Analysis Services.
 
+Semua contoh script di panduan ini memakai `-ExecutionPolicy Bypass`. Opsi tersebut hanya berlaku pada proses `powershell.exe` yang sedang dijalankan dan tidak mengubah execution policy mesin secara permanen. Kebijakan organisasi melalui Group Policy tetap dapat mengalahkan opsi ini.
+
 Jika assembly tidak terdeteksi otomatis, siapkan path ke `Microsoft.AnalysisServices.AdomdClient.dll` untuk parameter `-AdomdClientPath`. Collector akan mencari dependency lain di folder yang sama.
 
 ## 3. Validasi konfigurasi
@@ -52,7 +54,8 @@ Bawa minimal `Collect-SSAS.ps1` dan `config.json` ke folder yang sama pada serve
 Contoh bila package berada di `D:\SSAS-Assessment` tetapi PowerShell sedang berada di folder lain:
 
 ```powershell
-& 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
   -AssessmentId 'EVSET-002'
 ```
@@ -66,7 +69,8 @@ Jangan memakai `-Force` untuk collection fresh. Secara default artifact existing
 Jika ADOMD tidak ditemukan:
 
 ```powershell
-.\Collect-SSAS.ps1 `
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
   -AssessmentId 'EVSET-002' `
   -AdomdClientPath 'C:\Path\To\Microsoft.AnalysisServices.AdomdClient.dll'
@@ -84,7 +88,8 @@ Nama Model,DatabaseSumber,SQLSERVER\INSTANCE
 Kolom `SqlServer` boleh dikosongkan bila satu server default diberikan melalui `-SqlServer`.
 
 ```powershell
-.\Collect-SSAS.ps1 `
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
   -AssessmentId 'EVSET-002' `
   -SourceMapPath '.\source-map.csv' `
@@ -141,7 +146,8 @@ XEvents/Multidimensional/*.xel
 Jalankan parser offline dari folder mana pun:
 
 ```powershell
-& 'C:\Projects\sql\ssas\Parse-SSASXEvents.ps1' `
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File 'C:\Projects\sql\ssas\Parse-SSASXEvents.ps1' `
   -RunId 'XEL-20260911'
 ```
 
@@ -166,7 +172,8 @@ Untuk Multidimensional, parser memasangkan QueryBegin/QueryEnd dan sub-event ber
 Jika DLL tidak ditemukan otomatis:
 
 ```powershell
-& 'C:\Projects\sql\ssas\Parse-SSASXEvents.ps1' `
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File 'C:\Projects\sql\ssas\Parse-SSASXEvents.ps1' `
   -RunId 'XEL-20260911' `
   -XEventDllPath 'C:\Program Files\Microsoft SQL Server\160\Shared\Microsoft.SqlServer.XEvent.Linq.dll'
 ```
@@ -188,7 +195,9 @@ Setelah scorecard memilih maksimal delapan kandidat, ikuti `SSAS_RUNTIME_PROFILI
 Setelah manifest lolos validasi, jalankan generator assessment terhadap evidence set baru:
 
 ```powershell
-.\build_assessment.ps1 -EvidenceRoot 'C:\Projects\sql\ssas\evidence\EVSET-002'
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File 'C:\Projects\sql\ssas\build_assessment.ps1' `
+  -EvidenceRoot 'C:\Projects\sql\ssas\evidence\EVSET-002'
 ```
 
 Laporan harus tetap membedakan `OBSERVED`, `INFERRED`, dan `REQUIRES VALIDATION`. Bila bukti runtime atau processing belum tersedia, gunakan:
