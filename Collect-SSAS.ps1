@@ -692,6 +692,12 @@ if (-not $scriptDirectory) { $scriptDirectory = (Get-Location).Path }
 if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) {
     $ConfigPath = Join-Path $scriptDirectory $ConfigPath
 }
+if ($SourceMapPath -and (-not [System.IO.Path]::IsPathRooted($SourceMapPath))) {
+    $SourceMapPath = Join-Path $scriptDirectory $SourceMapPath
+}
+if ($AdomdClientPath -and (-not [System.IO.Path]::IsPathRooted($AdomdClientPath))) {
+    $AdomdClientPath = Join-Path $scriptDirectory $AdomdClientPath
+}
 
 Write-Host ("SSAS Evidence Collector v" + $script:CollectorVersion + " (PowerShell 4.0 compatible)")
 Import-SSASLibraries -RequestedAdomdPath $AdomdClientPath

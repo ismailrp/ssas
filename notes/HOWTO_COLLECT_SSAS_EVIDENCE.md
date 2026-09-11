@@ -45,15 +45,19 @@ Buka `config.json` dan periksa:
 
 Jangan gunakan kembali `EVSET-001`. Baseline lama harus dipertahankan agar hasil dapat dibandingkan dan tidak tertimpa.
 
-## 4. Jalankan collection baru
+## 4. Jalankan collection baru dari folder mana pun
 
-Buka Windows PowerShell sebagai account yang sudah diberi akses, kemudian:
+Bawa minimal `Collect-SSAS.ps1` dan `config.json` ke folder yang sama pada server. Semua default path diselesaikan relatif terhadap lokasi script/config, bukan current working directory. Karena itu script dapat dipanggil dari folder mana pun.
+
+Contoh bila package berada di `D:\SSAS-Assessment` tetapi PowerShell sedang berada di folder lain:
 
 ```powershell
-Set-Location -LiteralPath 'C:\Projects\sql\ssas'
-
-.\Collect-SSAS.ps1 -ConfigPath '.\config.json' -AssessmentId 'EVSET-002'
+& 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
+  -ConfigPath '.\config.json' `
+  -AssessmentId 'EVSET-002'
 ```
+
+Dengan contoh tersebut, `config.json` dicari di `D:\SSAS-Assessment` dan `output_root: ".\\evidence"` menghasilkan `D:\SSAS-Assessment\evidence\EVSET-002`.
 
 Untuk run berikutnya, gunakan ID baru, misalnya `EVSET-003` atau ID bertanggal yang aman untuk nama folder. Parameter `-AssessmentId` mengalahkan nilai di `config.json`.
 
@@ -125,13 +129,61 @@ Kriteria minimum sebelum assessment:
 
 Jika Multidimensional masih gagal, uji koneksi SSMS ke `BGASVR-DWH-DEV` dan pastikan service SSAS default instance aktif, firewall terbuka, serta account memiliki izin discover. Jangan mengganti kembali endpoint ke `BGASVR-DWH-DEV\SQLMULTIDIM` tanpa bukti bahwa named instance tersebut benar-benar ada.
 
-## 7. Runtime profiling setelah fleet assessment
+## 7. Parse file XEL setelah disalin
+
+Salin file XEL tanpa mengubah isinya ke:
+
+```text
+XEvents/Tabular/*.xel
+XEvents/Multidimensional/*.xel
+```
+
+Jalankan parser offline dari folder mana pun:
+
+```powershell
+& 'C:\Projects\sql\ssas\Parse-SSASXEvents.ps1' `
+  -RunId 'XEL-20260911'
+```
+
+Default input dan output selalu relatif terhadap lokasi `Parse-SSASXEvents.ps1`. Hasil berada di:
+
+```text
+results/XEvents/<RunId>/
+  parser_manifest.csv
+  summary.json
+  Tabular/events.csv
+  Tabular/queries.csv
+  Multidimensional/events.csv
+  Multidimensional/queries.csv
+```
+
+`events.csv` mempertahankan event-level evidence: timestamp, ActivityID, RequestID, SessionID, ConnectionID, SPID, DatabaseName, DurationMs, CpuTimeMs, NTUserName, TextData, hash teks, dan event subclass.
+
+Pada trace Tabular, ActivityID dapat tersimpan di XML `RequestProperties`, bukan sebagai field event langsung. Parser mengekstraknya dari `DbpropMsmdActivityID`, mempropagasikannya melalui `RequestID`, lalu menghubungkan QueryEnd dengan VertiPaqSEQueryEnd. `queries.csv` berisi total, CPU, jumlah/durasi SE, FE yang diturunkan, serta `CorrelationQuality`.
+
+Untuk Multidimensional, parser memasangkan QueryBegin/QueryEnd dan sub-event berdasarkan `ConnectionID + SPID + timestamp window`. Jika query overlap pada koneksi/SPID yang sama, hasil ditandai `AMBIGUOUS_OVERLAPPING_WINDOW`; metrik sub-event harus diperlakukan sebagai indikatif.
+
+Jika DLL tidak ditemukan otomatis:
+
+```powershell
+& 'C:\Projects\sql\ssas\Parse-SSASXEvents.ps1' `
+  -RunId 'XEL-20260911' `
+  -XEventDllPath 'C:\Program Files\Microsoft SQL Server\160\Shared\Microsoft.SqlServer.XEvent.Linq.dll'
+```
+
+Gunakan RunId baru untuk setiap batch. `-Force` hanya untuk overwrite hasil parsing yang disengaja. File dengan nol event tetap menghasilkan CSV ber-header dan count nol di `summary.json`; ini berarti XEL dapat dibaca tetapi tidak memuat event yang cocok, bukan bukti bahwa server tidak mempunyai masalah performa.
+
+QueryText dan NTUserName adalah data sensitif. Batasi akses folder `results`, dan gunakan hash query ketika teks asli tidak diperlukan untuk laporan.
+
+Parser lama `03_tabular_parser_to_csv.ps1` dan `04_multidimensional_parser_to_csv.ps1` tidak digunakan dalam workflow baru; gunakan `Parse-SSASXEvents.ps1` agar schema dan manifest konsisten.
+
+## 8. Runtime profiling setelah fleet assessment
 
 Snapshot `sessions.csv`, `connections.csv`, dan `commands.csv` bukan histori workload dan tidak dapat menghasilkan P50/P95/P99 atau FE/SE timing.
 
 Setelah scorecard memilih maksimal delapan kandidat, ikuti `SSAS_RUNTIME_PROFILING_GUIDE.md` dan file XMLA/parser yang sesuai. XEvent harus memiliki filter database/waktu sempit, retention plan, approval, dan dihentikan segera setelah reproduksi. Clear cache dan processing tidak dilakukan tanpa change window eksplisit.
 
-## 8. Tahap berikutnya
+## 9. Tahap berikutnya
 
 Setelah manifest lolos validasi, jalankan generator assessment terhadap evidence set baru:
 
@@ -142,4 +194,3 @@ Setelah manifest lolos validasi, jalankan generator assessment terhadap evidence
 Laporan harus tetap membedakan `OBSERVED`, `INFERRED`, dan `REQUIRES VALIDATION`. Bila bukti runtime atau processing belum tersedia, gunakan:
 
 > `NOT PROVABLE FROM CURRENT EVIDENCE`
-
