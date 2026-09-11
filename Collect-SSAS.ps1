@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:CollectorVersion = "2.0"
+$script:CollectorVersion = "2.1"
 $script:CollectionStartedAtUtc = [DateTime]::UtcNow
 
 function Write-Info($msg) {
@@ -511,45 +511,110 @@ function Export-CollectionMetadata {
     $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
+function Get-AutomaticSourceMappings([string]$Root, [object[]]$DatabaseInventory) {
+    $mappings = New-Object System.Collections.ArrayList
+    $seen = @{}
+    foreach ($databaseRow in $DatabaseInventory) {
+        if ($databaseRow.ServerType -ne "TABULAR" -or (-not $databaseRow.Selected)) { continue }
+        $safeDatabase = Sanitize-Name ([string]$databaseRow.Database)
+        $tmslPath = Join-Path (Join-Path (Join-Path $Root "TABULAR") $safeDatabase) "model\database.tmsl.json"
+        if (-not (Test-Path -LiteralPath $tmslPath)) { continue }
+        try {
+            $json = Get-Content -LiteralPath $tmslPath -Raw | ConvertFrom-Json
+            $dataSources = @($json.createOrReplace.database.model.dataSources)
+            foreach ($dataSource in $dataSources) {
+                $connectionString = [string]$dataSource.connectionString
+                if (-not $connectionString) { continue }
+                try {
+                    $builder = New-Object System.Data.Common.DbConnectionStringBuilder
+                    # Use the CLR setter explicitly. PowerShell can otherwise
+                    # treat ConnectionString as a dictionary key on this type.
+                    $builder.set_ConnectionString($connectionString)
+                    $sourceServer = ""
+                    $sourceDatabase = ""
+                    foreach ($key in @("Data Source","Server","Address","Addr","Network Address")) {
+                        if ($builder.ContainsKey($key)) { $sourceServer = [string]$builder[$key]; break }
+                    }
+                    foreach ($key in @("Initial Catalog","Database")) {
+                        if ($builder.ContainsKey($key)) { $sourceDatabase = [string]$builder[$key]; break }
+                    }
+                    if ((-not $sourceServer) -or (-not $sourceDatabase)) { continue }
+                    $mapKey = ([string]$databaseRow.Database) + "|" + $sourceServer + "|" + $sourceDatabase
+                    if ($seen.ContainsKey($mapKey)) { continue }
+                    $seen[$mapKey] = $true
+                    [void]$mappings.Add((New-Object PSObject -Property @{
+                        Database = [string]$databaseRow.Database
+                        SqlServer = $sourceServer
+                        SourceDatabase = $sourceDatabase
+                        DataSourceName = [string]$dataSource.name
+                        DiscoveryStatus = "AUTO_DISCOVERED_FROM_CURRENT_TMSL"
+                    }))
+                }
+                catch {
+                    Write-Warning ("Tidak dapat membaca endpoint data source TMSL untuk " + $databaseRow.Database + " / " + $dataSource.name)
+                }
+            }
+        }
+        catch {
+            Write-Warning ("Auto source mapping gagal untuk " + $databaseRow.Database + ": " + $_.Exception.Message)
+        }
+    }
+    return $mappings
+}
+
 function Collect-SourceSqlEvidence {
     param(
         [System.Collections.ArrayList]$Manifest,
         [string]$MapPath,
         [string]$DefaultSqlServer,
-        [string]$Root
+        [string]$Root,
+        [object[]]$AutomaticMappings
     )
 
-    if (-not $MapPath) { return }
-    if (-not (Test-Path -LiteralPath $MapPath)) { throw "Source map tidak ditemukan: $MapPath" }
-
-    $mappings = @(Import-Csv -LiteralPath $MapPath)
+    $mappings = @()
+    if ($MapPath) {
+        if (-not (Test-Path -LiteralPath $MapPath)) { throw "Source map tidak ditemukan: $MapPath" }
+        $mappings = @(Import-Csv -LiteralPath $MapPath)
+    }
+    else {
+        $mappings = @($AutomaticMappings)
+    }
+    if ($mappings.Count -eq 0) { return }
     $sourceQueries = @(
         (New-Object PSObject -Property @{ Name='source_columns'; File='columns.csv'; Query="SELECT s.name AS schema_name, t.name AS table_name, c.column_id, c.name AS column_name, ty.name AS data_type, c.max_length, c.precision, c.scale, c.is_nullable, c.is_computed, c.is_identity FROM sys.tables AS t JOIN sys.schemas AS s ON s.schema_id=t.schema_id JOIN sys.columns AS c ON c.object_id=t.object_id JOIN sys.types AS ty ON ty.user_type_id=c.user_type_id ORDER BY s.name,t.name,c.column_id" }),
         (New-Object PSObject -Property @{ Name='source_high_cardinality_candidates'; File='high_cardinality_candidates.csv'; Query="SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name, ty.name AS data_type, c.max_length, c.is_computed FROM sys.tables AS t JOIN sys.schemas AS s ON s.schema_id=t.schema_id JOIN sys.columns AS c ON c.object_id=t.object_id JOIN sys.types AS ty ON ty.user_type_id=c.user_type_id WHERE ty.name IN ('uniqueidentifier','nvarchar','varchar','ntext','text','datetime','datetime2','float','real') ORDER BY c.max_length DESC,s.name,t.name,c.column_id" }),
         (New-Object PSObject -Property @{ Name='source_modules'; File='modules.csv'; Query="SELECT s.name AS schema_name, o.name AS object_name, o.type_desc, m.definition FROM sys.sql_modules AS m JOIN sys.objects AS o ON o.object_id=m.object_id JOIN sys.schemas AS s ON s.schema_id=o.schema_id WHERE o.type IN ('V','IF','TF','FN','P') ORDER BY s.name,o.name" })
     )
 
+    $uniqueSources = @{}
     foreach ($mapping in $mappings) {
-        $modelDatabase = [string]$mapping.Database
         $sourceDatabase = [string]$mapping.SourceDatabase
         $mappedSqlServer = [string]$mapping.SqlServer
         if (-not $mappedSqlServer) { $mappedSqlServer = $DefaultSqlServer }
-        if ((-not $modelDatabase) -or (-not $sourceDatabase) -or (-not $mappedSqlServer)) {
-            Write-Warning "Source-map row dilewati: Database, SourceDatabase, dan SqlServer (column atau -SqlServer) wajib tersedia."
+        if ((-not $sourceDatabase) -or (-not $mappedSqlServer)) {
+            Write-Warning "Source-map row dilewati: SourceDatabase dan SqlServer wajib tersedia."
             continue
         }
+        $sourceKey = $mappedSqlServer + "|" + $sourceDatabase
+        if (-not $uniqueSources.ContainsKey($sourceKey)) { $uniqueSources[$sourceKey] = $mapping }
+    }
 
-        $sourceDir = Join-Path (Join-Path (Join-Path $Root "TABULAR") (Sanitize-Name $modelDatabase)) "source_sql"
+    foreach ($mapping in $uniqueSources.Values) {
+        $sourceDatabase = [string]$mapping.SourceDatabase
+        $mappedSqlServer = [string]$mapping.SqlServer
+        if (-not $mappedSqlServer) { $mappedSqlServer = $DefaultSqlServer }
+
+        $sourceDir = Join-Path (Join-Path (Join-Path $Root "SOURCE_SQL") (Sanitize-Name $mappedSqlServer)) (Sanitize-Name $sourceDatabase)
         Ensure-Directory $sourceDir
 
         foreach ($sourceQuery in $sourceQueries) {
             $path = Join-Path $sourceDir $sourceQuery.File
             if ((-not $Force) -and (Test-Path -LiteralPath $path)) {
-                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "SKIPPED" -Message "Artifact already exists." -Path $path
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $sourceDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "SKIPPED" -Message "Artifact already exists." -Path $path
                 continue
             }
             if ($WhatIf) {
-                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "WHATIF" -Message "Query not executed." -Path $path
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $sourceDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "WHATIF" -Message "Query not executed." -Path $path
                 continue
             }
 
@@ -571,10 +636,10 @@ function Collect-SourceSqlEvidence {
                 $status = "SUCCESS"
                 $message = "Rows=$rows"
                 if ($rows -eq 0) { $status = "SUCCESS_EMPTY"; $message = "Query succeeded but returned 0 rows." }
-                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status $status -Message $message -Path $path
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $sourceDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status $status -Message $message -Path $path
             }
             catch {
-                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "QUERY_FAILED_OR_UNSUPPORTED" -Message $_.Exception.Message -Path $path
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $sourceDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "QUERY_FAILED_OR_UNSUPPORTED" -Message $_.Exception.Message -Path $path
             }
             finally {
                 if ($null -ne $adapter) { try { $adapter.Dispose() } catch {} }
@@ -775,10 +840,7 @@ $multidimMetadata = @{
     kpis           = 'SELECT * FROM $SYSTEM.MDSCHEMA_KPIS'
 }
 
-$multidimStorage = @{
-    storage_tables  = 'SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLES'
-    partition_stats = 'SELECT * FROM $SYSTEM.DISCOVER_PARTITION_STAT'
-}
+$multidimStorage = @{}
 
 $serverRuntime = @{
     server_properties = 'SELECT * FROM $SYSTEM.DISCOVER_PROPERTIES'
@@ -1012,18 +1074,33 @@ foreach ($srv in $config.servers) {
             }
 
             if ($config.collect.database_storage -eq $true) {
+                $cubeMetadataPath = Join-Path $metaDir "cubes.csv"
+                $cubeNames = @()
+                if (Test-Path -LiteralPath $cubeMetadataPath) {
+                    # CUBE_SOURCE=1 represents real cubes/perspectives. Exclude
+                    # CUBE_SOURCE=2 dimension cubes from partition collection.
+                    $cubeNames = @(Import-Csv -LiteralPath $cubeMetadataPath | Where-Object {
+                        $_.CUBE_NAME -and ([string]$_.CUBE_SOURCE -eq "1")
+                    } | Select-Object -ExpandProperty CUBE_NAME -Unique)
+                }
 
-                foreach ($key in $multidimStorage.Keys) {
-
-                    Collect-QueryArtifact `
-                        -Manifest $manifest `
-                        -Server $serverName `
-                        -ServerType $serverType `
-                        -Database $dbName `
-                        -Category "STORAGE" `
-                        -Name $key `
-                        -Query $multidimStorage[$key] `
-                        -OutputPath (Join-Path $storageDir ($key + ".csv"))
+                if ($cubeNames.Count -eq 0) {
+                    Add-ManifestRow -Manifest $manifest -Server $serverName -ServerType $serverType `
+                        -Database $dbName -Category "STORAGE" -Artifact "partition_stats" `
+                        -Status "QUERY_FAILED_OR_UNSUPPORTED" `
+                        -Message "Tidak ada CUBE_NAME dari metadata/cubes.csv; partition statistics tidak dapat direstrict dengan aman." `
+                        -Path $storageDir
+                }
+                else {
+                    foreach ($cubeName in $cubeNames) {
+                        $escapedDatabase = $dbName.Replace("'", "''")
+                        $escapedCube = ([string]$cubeName).Replace("'", "''")
+                        $safeCube = Sanitize-Name ([string]$cubeName)
+                        $partitionQuery = "SELECT * FROM SYSTEMRESTRICTSCHEMA(`$SYSTEM.DISCOVER_PARTITION_STAT, [DATABASE_NAME] = '$escapedDatabase', [CUBE_NAME] = '$escapedCube')"
+                        Collect-QueryArtifact -Manifest $manifest -Server $serverName -ServerType $serverType `
+                            -Database $dbName -Category "STORAGE" -Name ("partition_stats__" + $safeCube) `
+                            -Query $partitionQuery -OutputPath (Join-Path $storageDir ("partition_stats__" + $safeCube + ".csv"))
+                    }
                 }
 
                 if ($config.collect.database_object_memory_usage -eq $true) {
@@ -1071,7 +1148,15 @@ foreach ($srv in $config.servers) {
     }
 }
 
-Collect-SourceSqlEvidence -Manifest $manifest -MapPath $SourceMapPath -DefaultSqlServer $SqlServer -Root $assessmentRoot
+$automaticMappings = @(Get-AutomaticSourceMappings -Root $assessmentRoot -DatabaseInventory @($dbInventory))
+$automaticMapPath = Join-Path $assessmentRoot "MANIFEST\source_map_auto.csv"
+$automaticMappings | Select-Object Database,SqlServer,SourceDatabase,DataSourceName,DiscoveryStatus |
+    Export-Csv -LiteralPath $automaticMapPath -NoTypeInformation -Encoding UTF8
+
+if ($config.collect.source_sql -eq $true -or $SourceMapPath) {
+    Collect-SourceSqlEvidence -Manifest $manifest -MapPath $SourceMapPath -DefaultSqlServer $SqlServer `
+        -Root $assessmentRoot -AutomaticMappings $automaticMappings
+}
 
 $dbInventory |
     Select-Object Server,ServerType,Database,Selected |

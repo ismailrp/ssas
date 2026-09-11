@@ -1,5 +1,5 @@
 {
-  "assessment_id": "EVSET-002",
+  "assessment_id": "EVSET-003",
   "output_root": ".\\evidence",
   "servers": [
     {
@@ -25,6 +25,7 @@
     "database_metadata": true,
     "database_storage": true,
     "tabular_tmsl": true,
+    "source_sql": false,
     "server_memory_usage": false,
     "database_object_memory_usage": false
   },
