@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:CollectorVersion = "2.1"
+$script:CollectorVersion = "2.2"
 $script:CollectionStartedAtUtc = [DateTime]::UtcNow
 
 function Write-Info($msg) {
@@ -34,6 +34,9 @@ function Protect-SensitiveText([string]$Text) {
     $protected = $protected -replace '(?i)(password|pwd)\s*=\s*[^;"\r\n]*', '$1=[REDACTED]'
     $protected = $protected -replace '(?i)(user\s*id|uid)\s*=\s*[^;"\r\n]*', '$1=[REDACTED]'
     $protected = $protected -replace '(?i)"(password|pwd|token|secret|credential)"\s*:\s*"[^"]*"', '"$1":"[REDACTED]"'
+    $protected = $protected -replace '(?i)(-password|-pwd|-token|-secret|-credential)\s+("[^"]*"|''[^'']*''|\S+)', '$1 [REDACTED]'
+    $protected = $protected -replace '(?i)(authorization\s*:\s*bearer)\s+\S+', '$1 [REDACTED]'
+    $protected = $protected -replace '(?i)(api[_-]?key)\s*[:=]\s*[^;\s"'']+', '$1=[REDACTED]'
     return $protected
 }
 
@@ -651,6 +654,72 @@ function Collect-SourceSqlEvidence {
     }
 }
 
+function Collect-SqlAgentEvidence {
+    param(
+        [System.Collections.ArrayList]$Manifest,
+        [string[]]$SqlServers,
+        [string]$Root,
+        [int]$HistoryDays
+    )
+
+    if ($HistoryDays -lt 1) { $HistoryDays = 90 }
+    $relevantPredicate = "s.subsystem IN ('ANALYSISCOMMAND','ANALYSISQUERY') OR s.command LIKE '%Invoke-ASCmd%' OR s.command LIKE '%Microsoft.AnalysisServices%' OR s.command LIKE '%ProcessFull%' OR s.command LIKE '%ProcessData%' OR s.command LIKE '%ProcessAdd%' OR s.command LIKE '%<Process%'"
+    $queries = @(
+        (New-Object PSObject -Property @{ Name="agent_jobs"; File="jobs.csv"; Query="SELECT j.job_id, j.name AS job_name, j.enabled, SUSER_SNAME(j.owner_sid) AS owner_name, j.description, j.start_step_id, j.date_created, j.date_modified, c.name AS category_name, j.notify_level_eventlog, j.notify_level_email FROM msdb.dbo.sysjobs AS j LEFT JOIN msdb.dbo.syscategories AS c ON c.category_id=j.category_id ORDER BY j.name" }),
+        (New-Object PSObject -Property @{ Name="agent_ssas_steps"; File="ssas_job_steps.csv"; Query=("SELECT j.job_id, j.name AS job_name, j.enabled, s.step_id, s.step_name, s.subsystem, s.database_name, s.command, s.on_success_action, s.on_success_step_id, s.on_fail_action, s.on_fail_step_id, s.retry_attempts, s.retry_interval FROM msdb.dbo.sysjobs AS j JOIN msdb.dbo.sysjobsteps AS s ON s.job_id=j.job_id WHERE " + $relevantPredicate + " ORDER BY j.name,s.step_id") }),
+        (New-Object PSObject -Property @{ Name="agent_ssas_schedules"; File="ssas_job_schedules.csv"; Query=("SELECT j.job_id, j.name AS job_name, sc.schedule_id, sc.name AS schedule_name, sc.enabled AS schedule_enabled, sc.freq_type, sc.freq_interval, sc.freq_subday_type, sc.freq_subday_interval, sc.freq_relative_interval, sc.freq_recurrence_factor, sc.active_start_date, sc.active_start_time, sc.active_end_date, sc.active_end_time, js.next_run_date, js.next_run_time FROM msdb.dbo.sysjobs AS j JOIN msdb.dbo.sysjobschedules AS js ON js.job_id=j.job_id JOIN msdb.dbo.sysschedules AS sc ON sc.schedule_id=js.schedule_id WHERE EXISTS (SELECT 1 FROM msdb.dbo.sysjobsteps AS s WHERE s.job_id=j.job_id AND (" + $relevantPredicate + ")) ORDER BY j.name,sc.name") }),
+        (New-Object PSObject -Property @{ Name="agent_ssas_history"; File="ssas_job_history.csv"; Query=("SELECT j.job_id, j.name AS job_name, h.instance_id, h.step_id, h.step_name, h.sql_message_id, h.sql_severity, h.message, h.run_status, msdb.dbo.agent_datetime(h.run_date,h.run_time) AS run_datetime, h.run_duration, ((h.run_duration/10000)*3600)+(((h.run_duration%10000)/100)*60)+(h.run_duration%100) AS run_duration_seconds, h.retries_attempted, h.server FROM msdb.dbo.sysjobs AS j JOIN msdb.dbo.sysjobhistory AS h ON h.job_id=j.job_id WHERE h.run_date > 0 AND msdb.dbo.agent_datetime(h.run_date,h.run_time) >= DATEADD(day,-" + $HistoryDays + ",GETDATE()) AND EXISTS (SELECT 1 FROM msdb.dbo.sysjobsteps AS s WHERE s.job_id=j.job_id AND (" + $relevantPredicate + ")) ORDER BY h.instance_id DESC") }),
+        (New-Object PSObject -Property @{ Name="agent_ssas_activity"; File="ssas_job_activity.csv"; Query=("SELECT j.job_id, j.name AS job_name, a.run_requested_date, a.queued_date, a.start_execution_date, a.stop_execution_date, a.last_executed_step_id, a.last_executed_step_date, a.job_history_id, CASE WHEN a.start_execution_date IS NOT NULL AND a.stop_execution_date IS NULL THEN 1 ELSE 0 END AS is_running FROM msdb.dbo.sysjobs AS j JOIN msdb.dbo.sysjobactivity AS a ON a.job_id=j.job_id WHERE a.session_id=(SELECT MAX(session_id) FROM msdb.dbo.syssessions) AND EXISTS (SELECT 1 FROM msdb.dbo.sysjobsteps AS s WHERE s.job_id=j.job_id AND (" + $relevantPredicate + ")) ORDER BY j.name") })
+    )
+
+    foreach ($sqlServerName in @($SqlServers | Where-Object { $_ } | Sort-Object -Unique)) {
+        $agentDir = Join-Path (Join-Path (Join-Path $Root "SQL_AGENT") (Sanitize-Name $sqlServerName)) "msdb"
+        Ensure-Directory $agentDir
+        foreach ($queryItem in $queries) {
+            $path = Join-Path $agentDir $queryItem.File
+            if ((-not $Force) -and (Test-Path -LiteralPath $path)) {
+                Add-ManifestRow -Manifest $Manifest -Server $sqlServerName -ServerType "SQL_AGENT" -Database "msdb" -Category "SQL_AGENT" -Artifact $queryItem.Name -Status "SKIPPED" -Message "Artifact already exists." -Path $path
+                continue
+            }
+            if ($WhatIf) {
+                Add-ManifestRow -Manifest $Manifest -Server $sqlServerName -ServerType "SQL_AGENT" -Database "msdb" -Category "SQL_AGENT" -Artifact $queryItem.Name -Status "WHATIF" -Message "Query not executed." -Path $path
+                continue
+            }
+
+            $connection = $null
+            $command = $null
+            $adapter = $null
+            $table = $null
+            try {
+                $connectionString = "Data Source=$sqlServerName;Initial Catalog=msdb;Integrated Security=True;Application Name=SSAS Evidence Collector;Connection Timeout=15;"
+                $connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
+                $connection.Open()
+                $command = $connection.CreateCommand()
+                $command.CommandText = $queryItem.Query
+                $command.CommandTimeout = $script:QueryTimeoutSeconds
+                $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
+                $table = New-Object System.Data.DataTable
+                [void]$adapter.Fill($table)
+                $rowCount = Export-TableCsv -Table $table -Path $path
+                $status = "SUCCESS"
+                $message = "Rows=$rowCount"
+                if ($rowCount -eq 0) { $status = "SUCCESS_EMPTY"; $message = "Query succeeded but returned 0 rows." }
+                Add-ManifestRow -Manifest $Manifest -Server $sqlServerName -ServerType "SQL_AGENT" -Database "msdb" -Category "SQL_AGENT" -Artifact $queryItem.Name -Status $status -Message $message -Path $path
+            }
+            catch {
+                Add-ManifestRow -Manifest $Manifest -Server $sqlServerName -ServerType "SQL_AGENT" -Database "msdb" -Category "SQL_AGENT" -Artifact $queryItem.Name -Status "QUERY_FAILED_OR_UNSUPPORTED" -Message $_.Exception.Message -Path $path
+                Write-Warning ("SQL Agent " + $sqlServerName + " / " + $queryItem.Name + ": " + $_.Exception.Message)
+            }
+            finally {
+                if ($null -ne $adapter) { try { $adapter.Dispose() } catch {} }
+                if ($null -ne $command) { try { $command.Dispose() } catch {} }
+                if ($null -ne $table) { try { $table.Dispose() } catch {} }
+                if ($null -ne $connection) { try { $connection.Close() } catch {}; try { $connection.Dispose() } catch {} }
+            }
+        }
+    }
+}
+
 function Export-TabularTmsl {
     param(
         [System.Collections.ArrayList]$Manifest,
@@ -1093,13 +1162,34 @@ foreach ($srv in $config.servers) {
                 }
                 else {
                     foreach ($cubeName in $cubeNames) {
+                        $measureGroupPath = Join-Path $metaDir "measure_groups.csv"
+                        $measureGroupNames = @()
+                        if (Test-Path -LiteralPath $measureGroupPath) {
+                            $measureGroupNames = @(Import-Csv -LiteralPath $measureGroupPath | Where-Object {
+                                $_.CUBE_NAME -eq $cubeName -and $_.MEASUREGROUP_NAME
+                            } | Select-Object -ExpandProperty MEASUREGROUP_NAME -Unique)
+                        }
+                        if ($measureGroupNames.Count -eq 0) {
+                            Add-ManifestRow -Manifest $manifest -Server $serverName -ServerType $serverType `
+                                -Database $dbName -Category "STORAGE" -Artifact ("partition_stats__" + (Sanitize-Name $cubeName)) `
+                                -Status "QUERY_FAILED_OR_UNSUPPORTED" `
+                                -Message "Tidak ada MEASUREGROUP_NAME untuk cube; partition statistics tidak dapat direstrict dengan aman." `
+                                -Path $storageDir
+                            continue
+                        }
+
                         $escapedDatabase = $dbName.Replace("'", "''")
                         $escapedCube = ([string]$cubeName).Replace("'", "''")
                         $safeCube = Sanitize-Name ([string]$cubeName)
-                        $partitionQuery = "SELECT * FROM SYSTEMRESTRICTSCHEMA(`$SYSTEM.DISCOVER_PARTITION_STAT, [DATABASE_NAME] = '$escapedDatabase', [CUBE_NAME] = '$escapedCube')"
-                        Collect-QueryArtifact -Manifest $manifest -Server $serverName -ServerType $serverType `
-                            -Database $dbName -Category "STORAGE" -Name ("partition_stats__" + $safeCube) `
-                            -Query $partitionQuery -OutputPath (Join-Path $storageDir ("partition_stats__" + $safeCube + ".csv"))
+                        foreach ($measureGroupName in $measureGroupNames) {
+                            $escapedMeasureGroup = ([string]$measureGroupName).Replace("'", "''")
+                            $safeMeasureGroup = Sanitize-Name ([string]$measureGroupName)
+                            $artifactName = "partition_stats__" + $safeCube + "__" + $safeMeasureGroup
+                            $partitionQuery = "SELECT * FROM SYSTEMRESTRICTSCHEMA(`$SYSTEM.DISCOVER_PARTITION_STAT, [DATABASE_NAME] = '$escapedDatabase', [CUBE_NAME] = '$escapedCube', [MEASURE_GROUP_NAME] = '$escapedMeasureGroup')"
+                            Collect-QueryArtifact -Manifest $manifest -Server $serverName -ServerType $serverType `
+                                -Database $dbName -Category "STORAGE" -Name $artifactName `
+                                -Query $partitionQuery -OutputPath (Join-Path $storageDir ($artifactName + ".csv"))
+                        }
                     }
                 }
 
@@ -1156,6 +1246,15 @@ $automaticMappings | Select-Object Database,SqlServer,SourceDatabase,DataSourceN
 if ($config.collect.source_sql -eq $true -or $SourceMapPath) {
     Collect-SourceSqlEvidence -Manifest $manifest -MapPath $SourceMapPath -DefaultSqlServer $SqlServer `
         -Root $assessmentRoot -AutomaticMappings $automaticMappings
+}
+
+if ($config.collect.sql_agent -eq $true) {
+    $agentServers = @($automaticMappings | Select-Object -ExpandProperty SqlServer) + @($config.sql_agent_servers)
+    $historyDays = 90
+    if ($null -ne $config.collect.sql_agent_history_days) {
+        try { $historyDays = [int]$config.collect.sql_agent_history_days } catch { $historyDays = 90 }
+    }
+    Collect-SqlAgentEvidence -Manifest $manifest -SqlServers $agentServers -Root $assessmentRoot -HistoryDays $historyDays
 }
 
 $dbInventory |

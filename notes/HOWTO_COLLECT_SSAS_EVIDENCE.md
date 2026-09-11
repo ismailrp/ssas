@@ -57,12 +57,12 @@ Contoh bila package berada di `D:\SSAS-Assessment` tetapi PowerShell sedang bera
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
-  -AssessmentId 'EVSET-003'
+  -AssessmentId 'EVSET-004'
 ```
 
-Dengan contoh tersebut, `config.json` dicari di `D:\SSAS-Assessment` dan `output_root: ".\\evidence"` menghasilkan `D:\SSAS-Assessment\evidence\EVSET-003`.
+Dengan contoh tersebut, `config.json` dicari di `D:\SSAS-Assessment` dan `output_root: ".\\evidence"` menghasilkan `D:\SSAS-Assessment\evidence\EVSET-004`.
 
-Untuk run berikutnya, gunakan ID baru, misalnya `EVSET-004` atau ID bertanggal yang aman untuk nama folder. Parameter `-AssessmentId` mengalahkan nilai di `config.json`.
+Untuk run berikutnya, gunakan ID baru, misalnya `EVSET-005` atau ID bertanggal yang aman untuk nama folder. Parameter `-AssessmentId` mengalahkan nilai di `config.json`.
 
 Jangan memakai `-Force` untuk collection fresh. Secara default artifact existing dilewati. `-Force` hanya untuk overwrite yang disengaja pada evidence set yang sama setelah target dan dampaknya diperiksa.
 
@@ -72,7 +72,7 @@ Jika ADOMD tidak ditemukan:
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
-  -AssessmentId 'EVSET-003' `
+  -AssessmentId 'EVSET-004' `
   -AdomdClientPath 'C:\Path\To\Microsoft.AnalysisServices.AdomdClient.dll'
 ```
 
@@ -86,15 +86,13 @@ MANIFEST/source_map_auto.csv
 
 File tersebut hanya memuat model, nama data source, server SQL, database sumber, dan status discovery. Connection string, username, password, token, dan credential tidak ditulis ke mapping.
 
-Mapping hasil TMSL adalah kandidat, bukan jaminan endpoint masih benar. Review `source_map_auto.csv`, terutama alamat IP, alias lama, `localhost`, dan `.`. Validasi dengan owner karena connection string model dapat stale atau menunjuk lingkungan berbeda.
-
-Collection source SQL dinonaktifkan secara default melalui `collect.source_sql: false`. Setelah mapping otomatis direview dan account collector mempunyai izin metadata read-only pada source yang benar, ubah menjadi:
+Mapping hasil TMSL adalah kandidat, bukan jaminan endpoint masih benar. Collector versi 2.2 membentuk mapping di memori dan langsung mengumpulkan source evidence pada run yang sama melalui:
 
 ```json
 "source_sql": true
 ```
 
-Lalu jalankan collection dengan AssessmentId baru. Collector mendeduplikasi mapping sehingga setiap kombinasi SQL server/database hanya dikueri sekali dan menyimpan hasil di:
+Collector mendeduplikasi mapping sehingga setiap kombinasi SQL server/database hanya dikueri sekali dan menyimpan hasil di:
 
 ```text
 SOURCE_SQL/<server>/<source-database>/
@@ -102,9 +100,26 @@ SOURCE_SQL/<server>/<source-database>/
 
 Jika diperlukan, `-SourceMapPath` tetap dapat dipakai sebagai override untuk membatasi source tertentu, tetapi file manual tidak lagi wajib. Jangan menaruh credential di source map. Collector memakai Windows Integrated Security dan query read-only.
 
+Karena endpoint TMSL dapat stale, kegagalan koneksi satu source dicatat di manifest dan tidak menghentikan source/database lain. Jika owner belum menyetujui source access, ubah `source_sql` menjadi `false`; auto map tetap dibuat.
+
+### SQL Agent evidence
+
+Collector juga mengumpulkan SQL Agent evidence sekali jalan ketika konfigurasi berikut aktif:
+
+```json
+"sql_agent": true,
+"sql_agent_history_days": 90
+```
+
+Target SQL Agent berasal dari semua server unik pada auto source map ditambah `sql_agent_servers` pada `config.json`. Tambahkan orchestration server ke daftar tersebut bila SQL Agent berada di server yang tidak muncul dalam TMSL.
+
+Output berada di `SQL_AGENT/<server>/msdb/` dan mencakup inventory job, step yang terindikasi menjalankan SSAS, schedule, activity terkini, serta history 90 hari. Account collector memerlukan akses metadata read-only ke `msdb`; collector tidak menjalankan, mengubah, enable/disable, atau menghapus job.
+
+Job command dapat sensitif. Collector melakukan redaksi pola password, token, secret, credential, bearer token, API key, dan user ID sebelum menulis CSV. Tetap lakukan review sebelum evidence dibagikan.
+
 ## 6. Validasi hasil collection
 
-Periksa folder `evidence\EVSET-003\MANIFEST` terlebih dahulu:
+Periksa folder `evidence\EVSET-004\MANIFEST` terlebih dahulu:
 
 1. `databases.csv`: pastikan jumlah database Tabular dan Multidimensional sesuai inventory aktual.
 2. `collection_manifest.csv`: telusuri setiap `FAILED`, `QUERY_TIMEOUT`, `QUERY_FAILED_OR_UNSUPPORTED`, dan `SKIPPED`.
@@ -114,7 +129,7 @@ Periksa folder `evidence\EVSET-003\MANIFEST` terlebih dahulu:
 Contoh pemeriksaan cepat:
 
 ```powershell
-$root = 'C:\Projects\sql\ssas\evidence\EVSET-003'
+$root = 'C:\Projects\sql\ssas\evidence\EVSET-004'
 $databases = Import-Csv -LiteralPath (Join-Path $root 'MANIFEST\databases.csv')
 $manifest = Import-Csv -LiteralPath (Join-Path $root 'MANIFEST\collection_manifest.csv')
 
@@ -201,7 +216,7 @@ Setelah manifest lolos validasi, jalankan generator assessment terhadap evidence
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File 'C:\Projects\sql\ssas\build_assessment.ps1' `
-  -EvidenceRoot 'C:\Projects\sql\ssas\evidence\EVSET-003'
+  -EvidenceRoot 'C:\Projects\sql\ssas\evidence\EVSET-004'
 ```
 
 Laporan harus tetap membedakan `OBSERVED`, `INFERRED`, dan `REQUIRES VALIDATION`. Bila bukti runtime atau processing belum tersedia, gunakan:

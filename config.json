@@ -1,6 +1,9 @@
 {
-  "assessment_id": "EVSET-003",
+  "assessment_id": "EVSET-004",
   "output_root": ".\\evidence",
+  "sql_agent_servers": [
+    "BGASVR-DWH-DEV"
+  ],
   "servers": [
     {
       "name": "BGASVR-DWH-DEV\\SQLTABULAR",
@@ -25,7 +28,9 @@
     "database_metadata": true,
     "database_storage": true,
     "tabular_tmsl": true,
-    "source_sql": false,
+    "source_sql": true,
+    "sql_agent": true,
+    "sql_agent_history_days": 90,
     "server_memory_usage": false,
     "database_object_memory_usage": false
   },
