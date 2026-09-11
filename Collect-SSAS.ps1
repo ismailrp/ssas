@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$script:CollectorVersion = "2.2"
+$script:CollectorVersion = "2.3"
 $script:CollectionStartedAtUtc = [DateTime]::UtcNow
 
 function Write-Info($msg) {
@@ -333,6 +333,36 @@ function Get-DatabaseList([string]$Server) {
     }
 }
 
+function Get-MultidimensionalPartitionTargets([string]$ServerName, [string]$DatabaseName) {
+    $server = $null
+    $targets = New-Object System.Collections.ArrayList
+    try {
+        $server = New-Object Microsoft.AnalysisServices.Server
+        $server.Connect($ServerName)
+        $database = $server.Databases.FindByName($DatabaseName)
+        if ($null -eq $database) { throw "Database '$DatabaseName' tidak ditemukan melalui AMO." }
+
+        foreach ($cube in $database.Cubes) {
+            if ($null -eq $cube -or (-not $cube.Name)) { continue }
+            foreach ($measureGroup in $cube.MeasureGroups) {
+                if ($null -eq $measureGroup -or (-not $measureGroup.Name)) { continue }
+                foreach ($partition in $measureGroup.Partitions) {
+                    if ($null -eq $partition -or (-not $partition.Name)) { continue }
+                    [void]$targets.Add((New-Object PSObject -Property @{
+                        CubeName = [string]$cube.Name
+                        MeasureGroupName = [string]$measureGroup.Name
+                        PartitionName = [string]$partition.Name
+                    }))
+                }
+            }
+        }
+    }
+    finally {
+        if ($null -ne $server) { try { $server.Disconnect() } catch {}; try { $server.Dispose() } catch {} }
+    }
+    return $targets
+}
+
 function Resolve-Databases($ServerConfig, [string[]]$Discovered) {
     $requested = @($ServerConfig.databases)
     $excluded = @($ServerConfig.exclude_databases)
@@ -563,6 +593,65 @@ function Get-AutomaticSourceMappings([string]$Root, [object[]]$DatabaseInventory
         }
     }
     return $mappings
+}
+
+function Resolve-SqlSourceEndpoints([object[]]$Mappings) {
+    $script:SqlEndpointResolutions = New-Object System.Collections.ArrayList
+    $resolvedNames = @{}
+    foreach ($sourceName in @($Mappings | Select-Object -ExpandProperty SqlServer -Unique)) {
+        $canonicalName = [string]$sourceName
+        $status = "UNRESOLVED_USING_ORIGINAL"
+        $message = ""
+        $connection = $null
+        $command = $null
+        try {
+            $connectionString = "Data Source=$sourceName;Initial Catalog=master;Integrated Security=True;Application Name=SSAS Evidence Collector;Connection Timeout=15;"
+            $connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
+            $connection.Open()
+            $command = $connection.CreateCommand()
+            $command.CommandText = "SELECT CAST(SERVERPROPERTY('ServerName') AS nvarchar(128))"
+            $command.CommandTimeout = $script:QueryTimeoutSeconds
+            $value = $command.ExecuteScalar()
+            if ($null -ne $value -and [string]$value) {
+                $canonicalName = [string]$value
+                $status = "RESOLVED_BY_SERVERPROPERTY"
+            }
+        }
+        catch {
+            $message = $_.Exception.Message
+        }
+        finally {
+            if ($null -ne $command) { try { $command.Dispose() } catch {} }
+            if ($null -ne $connection) { try { $connection.Close() } catch {}; try { $connection.Dispose() } catch {} }
+        }
+        $resolvedNames[[string]$sourceName] = $canonicalName
+        [void]$script:SqlEndpointResolutions.Add((New-Object PSObject -Property @{
+            OriginalSqlServer = [string]$sourceName
+            CanonicalSqlServer = $canonicalName
+            ResolutionStatus = $status
+            Message = $message
+        }))
+    }
+
+    $result = New-Object System.Collections.ArrayList
+    $seen = @{}
+    foreach ($mapping in $Mappings) {
+        $original = [string]$mapping.SqlServer
+        $canonical = $resolvedNames[$original]
+        if (-not $canonical) { $canonical = $original }
+        $key = ([string]$mapping.Database) + "|" + $canonical + "|" + ([string]$mapping.SourceDatabase)
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        [void]$result.Add((New-Object PSObject -Property @{
+            Database = [string]$mapping.Database
+            OriginalSqlServer = $original
+            SqlServer = $canonical
+            SourceDatabase = [string]$mapping.SourceDatabase
+            DataSourceName = [string]$mapping.DataSourceName
+            DiscoveryStatus = [string]$mapping.DiscoveryStatus
+        }))
+    }
+    return $result
 }
 
 function Collect-SourceSqlEvidence {
@@ -1143,55 +1232,38 @@ foreach ($srv in $config.servers) {
             }
 
             if ($config.collect.database_storage -eq $true) {
-                $cubeMetadataPath = Join-Path $metaDir "cubes.csv"
-                $cubeNames = @()
-                if (Test-Path -LiteralPath $cubeMetadataPath) {
-                    # CUBE_SOURCE=1 represents real cubes/perspectives. Exclude
-                    # CUBE_SOURCE=2 dimension cubes from partition collection.
-                    $cubeNames = @(Import-Csv -LiteralPath $cubeMetadataPath | Where-Object {
-                        $_.CUBE_NAME -and ([string]$_.CUBE_SOURCE -eq "1")
-                    } | Select-Object -ExpandProperty CUBE_NAME -Unique)
+                $partitionTargets = @()
+                try {
+                    $partitionTargets = @(Get-MultidimensionalPartitionTargets -ServerName $serverName -DatabaseName $dbName)
                 }
-
-                if ($cubeNames.Count -eq 0) {
+                catch {
                     Add-ManifestRow -Manifest $manifest -Server $serverName -ServerType $serverType `
-                        -Database $dbName -Category "STORAGE" -Artifact "partition_stats" `
+                        -Database $dbName -Category "STORAGE" -Artifact "partition_discovery" `
                         -Status "QUERY_FAILED_OR_UNSUPPORTED" `
-                        -Message "Tidak ada CUBE_NAME dari metadata/cubes.csv; partition statistics tidak dapat direstrict dengan aman." `
+                        -Message ("AMO partition discovery gagal: " + $_.Exception.Message) `
                         -Path $storageDir
                 }
-                else {
-                    foreach ($cubeName in $cubeNames) {
-                        $measureGroupPath = Join-Path $metaDir "measure_groups.csv"
-                        $measureGroupNames = @()
-                        if (Test-Path -LiteralPath $measureGroupPath) {
-                            $measureGroupNames = @(Import-Csv -LiteralPath $measureGroupPath | Where-Object {
-                                $_.CUBE_NAME -eq $cubeName -and $_.MEASUREGROUP_NAME
-                            } | Select-Object -ExpandProperty MEASUREGROUP_NAME -Unique)
-                        }
-                        if ($measureGroupNames.Count -eq 0) {
-                            Add-ManifestRow -Manifest $manifest -Server $serverName -ServerType $serverType `
-                                -Database $dbName -Category "STORAGE" -Artifact ("partition_stats__" + (Sanitize-Name $cubeName)) `
-                                -Status "QUERY_FAILED_OR_UNSUPPORTED" `
-                                -Message "Tidak ada MEASUREGROUP_NAME untuk cube; partition statistics tidak dapat direstrict dengan aman." `
-                                -Path $storageDir
-                            continue
-                        }
 
-                        $escapedDatabase = $dbName.Replace("'", "''")
-                        $escapedCube = ([string]$cubeName).Replace("'", "''")
-                        $safeCube = Sanitize-Name ([string]$cubeName)
-                        foreach ($measureGroupName in $measureGroupNames) {
-                            $escapedMeasureGroup = ([string]$measureGroupName).Replace("'", "''")
-                            $safeMeasureGroup = Sanitize-Name ([string]$measureGroupName)
-                            $artifactName = "partition_stats__" + $safeCube + "__" + $safeMeasureGroup
-                            $partitionQuery = "SELECT * FROM SYSTEMRESTRICTSCHEMA(`$SYSTEM.DISCOVER_PARTITION_STAT, [DATABASE_NAME] = '$escapedDatabase', [CUBE_NAME] = '$escapedCube', [MEASURE_GROUP_NAME] = '$escapedMeasureGroup')"
-                            Collect-QueryArtifact -Manifest $manifest -Server $serverName -ServerType $serverType `
-                                -Database $dbName -Category "STORAGE" -Name $artifactName `
-                                -Query $partitionQuery -OutputPath (Join-Path $storageDir ($artifactName + ".csv"))
-                        }
-                    }
+                if ($partitionTargets.Count -eq 0 -and @($manifest | Where-Object { $_.Database -eq $dbName -and $_.Artifact -eq "partition_discovery" }).Count -eq 0) {
+                    Add-ManifestRow -Manifest $manifest -Server $serverName -ServerType $serverType `
+                        -Database $dbName -Category "STORAGE" -Artifact "partition_stats" `
+                        -Status "SUCCESS_EMPTY" -Message "AMO discovery berhasil tetapi tidak menemukan partition." -Path $storageDir
                 }
+
+                foreach ($target in $partitionTargets) {
+                    $escapedDatabase = $dbName.Replace("'", "''")
+                    $escapedCube = ([string]$target.CubeName).Replace("'", "''")
+                    $escapedMeasureGroup = ([string]$target.MeasureGroupName).Replace("'", "''")
+                    $escapedPartition = ([string]$target.PartitionName).Replace("'", "''")
+                    $safeCube = Sanitize-Name ([string]$target.CubeName)
+                    $safeMeasureGroup = Sanitize-Name ([string]$target.MeasureGroupName)
+                    $safePartition = Sanitize-Name ([string]$target.PartitionName)
+                    $artifactName = "partition_stats__" + $safeCube + "__" + $safeMeasureGroup + "__" + $safePartition
+                    $partitionQuery = "SELECT * FROM SYSTEMRESTRICTSCHEMA(`$SYSTEM.DISCOVER_PARTITION_STAT, [DATABASE_NAME] = '$escapedDatabase', [CUBE_NAME] = '$escapedCube', [MEASURE_GROUP_NAME] = '$escapedMeasureGroup', [PARTITION_NAME] = '$escapedPartition')"
+                    Collect-QueryArtifact -Manifest $manifest -Server $serverName -ServerType $serverType `
+                        -Database $dbName -Category "STORAGE" -Name $artifactName `
+                        -Query $partitionQuery -OutputPath (Join-Path $storageDir ($artifactName + ".csv"))
+                    }
 
                 if ($config.collect.database_object_memory_usage -eq $true) {
 
@@ -1238,10 +1310,13 @@ foreach ($srv in $config.servers) {
     }
 }
 
-$automaticMappings = @(Get-AutomaticSourceMappings -Root $assessmentRoot -DatabaseInventory @($dbInventory))
+$rawAutomaticMappings = @(Get-AutomaticSourceMappings -Root $assessmentRoot -DatabaseInventory @($dbInventory))
+$automaticMappings = @(Resolve-SqlSourceEndpoints -Mappings $rawAutomaticMappings)
 $automaticMapPath = Join-Path $assessmentRoot "MANIFEST\source_map_auto.csv"
-$automaticMappings | Select-Object Database,SqlServer,SourceDatabase,DataSourceName,DiscoveryStatus |
+$automaticMappings | Select-Object Database,OriginalSqlServer,SqlServer,SourceDatabase,DataSourceName,DiscoveryStatus |
     Export-Csv -LiteralPath $automaticMapPath -NoTypeInformation -Encoding UTF8
+$script:SqlEndpointResolutions | Select-Object OriginalSqlServer,CanonicalSqlServer,ResolutionStatus,Message |
+    Export-Csv -LiteralPath (Join-Path $assessmentRoot "MANIFEST\sql_endpoint_resolution.csv") -NoTypeInformation -Encoding UTF8
 
 if ($config.collect.source_sql -eq $true -or $SourceMapPath) {
     Collect-SourceSqlEvidence -Manifest $manifest -MapPath $SourceMapPath -DefaultSqlServer $SqlServer `

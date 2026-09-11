@@ -57,12 +57,12 @@ Contoh bila package berada di `D:\SSAS-Assessment` tetapi PowerShell sedang bera
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
-  -AssessmentId 'EVSET-004'
+  -AssessmentId 'EVSET-005'
 ```
 
-Dengan contoh tersebut, `config.json` dicari di `D:\SSAS-Assessment` dan `output_root: ".\\evidence"` menghasilkan `D:\SSAS-Assessment\evidence\EVSET-004`.
+Dengan contoh tersebut, `config.json` dicari di `D:\SSAS-Assessment` dan `output_root: ".\\evidence"` menghasilkan `D:\SSAS-Assessment\evidence\EVSET-005`.
 
-Untuk run berikutnya, gunakan ID baru, misalnya `EVSET-005` atau ID bertanggal yang aman untuk nama folder. Parameter `-AssessmentId` mengalahkan nilai di `config.json`.
+Untuk run berikutnya, gunakan ID baru, misalnya `EVSET-006` atau ID bertanggal yang aman untuk nama folder. Parameter `-AssessmentId` mengalahkan nilai di `config.json`.
 
 Jangan memakai `-Force` untuk collection fresh. Secara default artifact existing dilewati. `-Force` hanya untuk overwrite yang disengaja pada evidence set yang sama setelah target dan dampaknya diperiksa.
 
@@ -72,7 +72,7 @@ Jika ADOMD tidak ditemukan:
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File 'D:\SSAS-Assessment\Collect-SSAS.ps1' `
   -ConfigPath '.\config.json' `
-  -AssessmentId 'EVSET-004' `
+  -AssessmentId 'EVSET-005' `
   -AdomdClientPath 'C:\Path\To\Microsoft.AnalysisServices.AdomdClient.dll'
 ```
 
@@ -82,11 +82,12 @@ Source SQL tidak diperlukan untuk DMV SSAS. Collector otomatis membaca data sour
 
 ```text
 MANIFEST/source_map_auto.csv
+MANIFEST/sql_endpoint_resolution.csv
 ```
 
-File tersebut hanya memuat model, nama data source, server SQL, database sumber, dan status discovery. Connection string, username, password, token, dan credential tidak ditulis ke mapping.
+File tersebut hanya memuat model, nama data source, endpoint asli/canonical, database sumber, dan status discovery. Connection string, username, password, token, dan credential tidak ditulis ke mapping. Resolusi canonical mencegah `.`, `localhost`, hostname, dan IP yang menunjuk instance sama dikoleksi berulang.
 
-Mapping hasil TMSL adalah kandidat, bukan jaminan endpoint masih benar. Collector versi 2.2 membentuk mapping di memori dan langsung mengumpulkan source evidence pada run yang sama melalui:
+Mapping hasil TMSL adalah kandidat, bukan jaminan endpoint masih benar. Collector versi 2.3 membentuk mapping di memori, menyelesaikan alias SQL melalui `SERVERPROPERTY('ServerName')`, lalu langsung mengumpulkan source evidence pada run yang sama melalui:
 
 ```json
 "source_sql": true
@@ -119,7 +120,7 @@ Job command dapat sensitif. Collector melakukan redaksi pola password, token, se
 
 ## 6. Validasi hasil collection
 
-Periksa folder `evidence\EVSET-004\MANIFEST` terlebih dahulu:
+Periksa folder `evidence\EVSET-005\MANIFEST` terlebih dahulu:
 
 1. `databases.csv`: pastikan jumlah database Tabular dan Multidimensional sesuai inventory aktual.
 2. `collection_manifest.csv`: telusuri setiap `FAILED`, `QUERY_TIMEOUT`, `QUERY_FAILED_OR_UNSUPPORTED`, dan `SKIPPED`.
@@ -129,7 +130,7 @@ Periksa folder `evidence\EVSET-004\MANIFEST` terlebih dahulu:
 Contoh pemeriksaan cepat:
 
 ```powershell
-$root = 'C:\Projects\sql\ssas\evidence\EVSET-004'
+$root = 'C:\Projects\sql\ssas\evidence\EVSET-005'
 $databases = Import-Csv -LiteralPath (Join-Path $root 'MANIFEST\databases.csv')
 $manifest = Import-Csv -LiteralPath (Join-Path $root 'MANIFEST\collection_manifest.csv')
 
@@ -149,6 +150,7 @@ Kriteria minimum sebelum assessment:
 - seluruh database terpilih memiliki metadata dan storage yang dapat didukung versinya;
 - TMSL Tabular tersedia atau gap TOM tercatat;
 - Multidimensional mempunyai folder per database dan bukan hanya baris kegagalan discovery;
+- storage Multidimensional memiliki `partition_stats__<cube>__<measure-group>__<partition>.csv`; collector memperoleh target lengkap melalui AMO;
 - tidak ada credential pada CSV, JSON, log, atau source map.
 
 Jika Multidimensional masih gagal, uji koneksi SSMS ke `BGASVR-DWH-DEV` dan pastikan service SSAS default instance aktif, firewall terbuka, serta account memiliki izin discover. Jangan mengganti kembali endpoint ke `BGASVR-DWH-DEV\SQLMULTIDIM` tanpa bukti bahwa named instance tersebut benar-benar ada.
@@ -216,7 +218,7 @@ Setelah manifest lolos validasi, jalankan generator assessment terhadap evidence
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File 'C:\Projects\sql\ssas\build_assessment.ps1' `
-  -EvidenceRoot 'C:\Projects\sql\ssas\evidence\EVSET-004'
+  -EvidenceRoot 'C:\Projects\sql\ssas\evidence\EVSET-005'
 ```
 
 Laporan harus tetap membedakan `OBSERVED`, `INFERRED`, dan `REQUIRES VALIDATION`. Bila bukti runtime atau processing belum tersedia, gunakan:
