@@ -1,5 +1,5 @@
 {
-  "assessment_id": "EVSET-001",
+  "assessment_id": "EVSET-002",
   "output_root": ".\\evidence",
   "servers": [
     {
@@ -11,7 +11,7 @@
       "exclude_databases": []
     },
     {
-      "name": "BGASVR-DWH-DEV\\SQLMULTIDIM",
+      "name": "BGASVR-DWH-DEV",
       "type": "MULTIDIMENSIONAL",
       "databases": [
         "*"

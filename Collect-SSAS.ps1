@@ -1,16 +1,25 @@
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory=$false)]
-    [string]$ConfigPath = ".\config.json"
+    [string]$ConfigPath = ".\config.json",
+    [string]$AssessmentId = "",
+    [string]$OutputRoot = "",
+    [string]$AdomdClientPath = "",
+    [string]$SourceMapPath = "",
+    [string]$SqlServer = "",
+    [switch]$Force,
+    [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
+$script:CollectorVersion = "2.0"
+$script:CollectionStartedAtUtc = [DateTime]::UtcNow
 
 function Write-Info($msg) {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg"
 }
 
 function Ensure-Directory([string]$Path) {
-    if (-not (Test-Path $Path)) {
+    if (-not (Test-Path -LiteralPath $Path)) {
         New-Item -ItemType Directory -Path $Path -Force | Out-Null
     }
 }
@@ -19,7 +28,16 @@ function Sanitize-Name([string]$Name) {
     return ($Name -replace '[\\/:*?"<>|]', '_')
 }
 
-function Import-SSASLibraries {
+function Protect-SensitiveText([string]$Text) {
+    if ($null -eq $Text) { return $Text }
+    $protected = $Text
+    $protected = $protected -replace '(?i)(password|pwd)\s*=\s*[^;"\r\n]*', '$1=[REDACTED]'
+    $protected = $protected -replace '(?i)(user\s*id|uid)\s*=\s*[^;"\r\n]*', '$1=[REDACTED]'
+    $protected = $protected -replace '(?i)"(password|pwd|token|secret|credential)"\s*:\s*"[^"]*"', '"$1":"[REDACTED]"'
+    return $protected
+}
+
+function Import-SSASLibraries([string]$RequestedAdomdPath) {
     Write-Info "Loading SSAS client libraries..."
 
     $requiredAssemblies = @(
@@ -27,12 +45,28 @@ function Import-SSASLibraries {
         "Microsoft.AnalysisServices"
     )
 
+    $requestedDirectory = ""
+    if ($RequestedAdomdPath) {
+        $requestedFullPath = (Resolve-Path -LiteralPath $RequestedAdomdPath -ErrorAction Stop).Path
+        $requestedDirectory = Split-Path -Parent $requestedFullPath
+        if ($env:Path -notlike ("*" + $requestedDirectory + "*")) {
+            $env:Path = $requestedDirectory + ";" + $env:Path
+        }
+    }
+
     foreach ($asm in $requiredAssemblies) {
         try {
             $loaded = [System.Reflection.Assembly]::LoadWithPartialName($asm)
 
+            if (($null -eq $loaded) -and $requestedDirectory) {
+                $assemblyPath = Join-Path $requestedDirectory ($asm + ".dll")
+                if (Test-Path -LiteralPath $assemblyPath) {
+                    $loaded = [System.Reflection.Assembly]::LoadFrom($assemblyPath)
+                }
+            }
+
             if ($null -eq $loaded) {
-                throw "Assembly '$asm' tidak ditemukan."
+                throw "Assembly '$asm' tidak ditemukan. Install SSMS/SSDT atau gunakan -AdomdClientPath."
             }
 
             Write-Info ("Loaded: " + $loaded.FullName)
@@ -47,6 +81,13 @@ function Import-SSASLibraries {
         $tom = [System.Reflection.Assembly]::LoadWithPartialName(
             "Microsoft.AnalysisServices.Tabular"
         )
+
+        if (($null -eq $tom) -and $requestedDirectory) {
+            $tomPath = Join-Path $requestedDirectory "Microsoft.AnalysisServices.Tabular.dll"
+            if (Test-Path -LiteralPath $tomPath) {
+                $tom = [System.Reflection.Assembly]::LoadFrom($tomPath)
+            }
+        }
 
         if ($null -ne $tom) {
             Write-Info ("Loaded: " + $tom.FullName)
@@ -64,7 +105,7 @@ function Import-SSASLibraries {
 }
 
 function New-AdomdConnection([string]$Server, [string]$Database = "") {
-    $cs = "Data Source=$Server;Integrated Security=SSPI;"
+    $cs = "Data Source=$Server;Integrated Security=SSPI;Timeout=60;Application Name=SSAS Evidence Collector;"
     if ($Database) {
         $cs += "Initial Catalog=$Database;"
     }
@@ -87,6 +128,9 @@ function Invoke-SSASQuery {
     )
 
     $conn = $null
+    $cmd = $null
+    $adapter = $null
+    $ds = $null
 
     try {
         $conn = New-AdomdConnection -Server $Server -Database $Database
@@ -113,9 +157,19 @@ function Invoke-SSASQuery {
 
         # IMPORTANT for PowerShell 4.0:
         # Prevent DataTable from being enumerated/unrolled into DataRow objects.
-        Write-Output -NoEnumerate $ds.Tables[0]
+        $resultTable = $ds.Tables[0].Copy()
+        Write-Output -NoEnumerate $resultTable
     }
     finally {
+        if ($null -ne $adapter) {
+            try { $adapter.Dispose() } catch {}
+        }
+        if ($null -ne $cmd) {
+            try { $cmd.Dispose() } catch {}
+        }
+        if ($null -ne $ds) {
+            try { $ds.Dispose() } catch {}
+        }
         if ($null -ne $conn) {
             try { $conn.Close() } catch {}
             try { $conn.Dispose() } catch {}
@@ -131,7 +185,7 @@ function Export-TableCsv {
 
     # Always create an artifact even when the rowset is empty.
     if ($null -eq $Table) {
-        "" | Set-Content -Path $Path -Encoding UTF8
+        "" | Set-Content -LiteralPath $Path -Encoding UTF8
         return 0
     }
 
@@ -163,10 +217,10 @@ function Export-TableCsv {
         }
 
         if ($header.Count -gt 0) {
-            ($header -join ",") | Set-Content -Path $Path -Encoding UTF8
+            ($header -join ",") | Set-Content -LiteralPath $Path -Encoding UTF8
         }
         else {
-            "" | Set-Content -Path $Path -Encoding UTF8
+            "" | Set-Content -LiteralPath $Path -Encoding UTF8
         }
 
         return 0
@@ -192,6 +246,13 @@ function Export-TableCsv {
                     $value = $null
                 }
 
+                if ($c.ColumnName -match '(?i)password|pwd|token|secret|credential') {
+                    $value = '[REDACTED]'
+                }
+                elseif ($value -is [string]) {
+                    $value = Protect-SensitiveText $value
+                }
+
                 $obj | Add-Member `
                     -MemberType NoteProperty `
                     -Name $c.ColumnName `
@@ -202,7 +263,7 @@ function Export-TableCsv {
         $rows += $obj
     }
 
-    $rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+    $rows | Export-Csv -LiteralPath $Path -NoTypeInformation -Encoding UTF8
 
     return $Table.Rows.Count
 }
@@ -327,6 +388,24 @@ function Collect-QueryArtifact {
 
     $t = $null
 
+    if ((-not $Force) -and (Test-Path -LiteralPath $OutputPath)) {
+        Add-ManifestRow `
+            -Manifest $Manifest -Server $Server -ServerType $ServerType `
+            -Database $Database -Category $Category -Artifact $Name `
+            -Status "SKIPPED" -Message "Artifact already exists; use -Force only for intentional overwrite." `
+            -Path $OutputPath
+        Write-Info ("SKIPPED existing " + $Database + " :: " + $Name)
+        return
+    }
+
+    if ($WhatIf) {
+        Add-ManifestRow `
+            -Manifest $Manifest -Server $Server -ServerType $ServerType `
+            -Database $Database -Category $Category -Artifact $Name `
+            -Status "WHATIF" -Message "Query not executed." -Path $OutputPath
+        return
+    }
+
     Write-Info ("START " + $Database + " :: " + $Name)
 
     # Stage 1: query execution
@@ -340,6 +419,10 @@ function Collect-QueryArtifact {
         $msg = $_.Exception.Message
 
         $status = "QUERY_FAILED_OR_UNSUPPORTED"
+
+        if ($msg -match '(?i)request type.*not recognized|not recognized.*request type|not supported|unsupported') {
+            $msg = "UNSUPPORTED: " + $msg
+        }
 
         if (($msg -match "timeout") -or ($msg -match "timed out") -or ($msg -match "time-out")) {
             $status = "QUERY_TIMEOUT"
@@ -403,6 +486,106 @@ function Collect-QueryArtifact {
     }
 }
 
+function Export-CollectionMetadata {
+    param(
+        [string]$Server,
+        [string]$ServerType,
+        [string]$Database,
+        [string]$Path
+    )
+
+    if ((-not $Force) -and (Test-Path -LiteralPath $Path)) { return }
+    if ($WhatIf) { return }
+
+    $metadata = New-Object PSObject -Property @{
+        collector             = "Collect-SSAS.ps1"
+        collector_version     = $script:CollectorVersion
+        assessment_id         = $AssessmentId
+        server                = $Server
+        server_type           = $ServerType
+        database              = $Database
+        collected_at_utc      = [DateTime]::UtcNow.ToString("o")
+        powershell_version    = $PSVersionTable.PSVersion.ToString()
+        query_timeout_seconds = $script:QueryTimeoutSeconds
+    }
+    $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+function Collect-SourceSqlEvidence {
+    param(
+        [System.Collections.ArrayList]$Manifest,
+        [string]$MapPath,
+        [string]$DefaultSqlServer,
+        [string]$Root
+    )
+
+    if (-not $MapPath) { return }
+    if (-not (Test-Path -LiteralPath $MapPath)) { throw "Source map tidak ditemukan: $MapPath" }
+
+    $mappings = @(Import-Csv -LiteralPath $MapPath)
+    $sourceQueries = @(
+        (New-Object PSObject -Property @{ Name='source_columns'; File='columns.csv'; Query="SELECT s.name AS schema_name, t.name AS table_name, c.column_id, c.name AS column_name, ty.name AS data_type, c.max_length, c.precision, c.scale, c.is_nullable, c.is_computed, c.is_identity FROM sys.tables AS t JOIN sys.schemas AS s ON s.schema_id=t.schema_id JOIN sys.columns AS c ON c.object_id=t.object_id JOIN sys.types AS ty ON ty.user_type_id=c.user_type_id ORDER BY s.name,t.name,c.column_id" }),
+        (New-Object PSObject -Property @{ Name='source_high_cardinality_candidates'; File='high_cardinality_candidates.csv'; Query="SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name, ty.name AS data_type, c.max_length, c.is_computed FROM sys.tables AS t JOIN sys.schemas AS s ON s.schema_id=t.schema_id JOIN sys.columns AS c ON c.object_id=t.object_id JOIN sys.types AS ty ON ty.user_type_id=c.user_type_id WHERE ty.name IN ('uniqueidentifier','nvarchar','varchar','ntext','text','datetime','datetime2','float','real') ORDER BY c.max_length DESC,s.name,t.name,c.column_id" }),
+        (New-Object PSObject -Property @{ Name='source_modules'; File='modules.csv'; Query="SELECT s.name AS schema_name, o.name AS object_name, o.type_desc, m.definition FROM sys.sql_modules AS m JOIN sys.objects AS o ON o.object_id=m.object_id JOIN sys.schemas AS s ON s.schema_id=o.schema_id WHERE o.type IN ('V','IF','TF','FN','P') ORDER BY s.name,o.name" })
+    )
+
+    foreach ($mapping in $mappings) {
+        $modelDatabase = [string]$mapping.Database
+        $sourceDatabase = [string]$mapping.SourceDatabase
+        $mappedSqlServer = [string]$mapping.SqlServer
+        if (-not $mappedSqlServer) { $mappedSqlServer = $DefaultSqlServer }
+        if ((-not $modelDatabase) -or (-not $sourceDatabase) -or (-not $mappedSqlServer)) {
+            Write-Warning "Source-map row dilewati: Database, SourceDatabase, dan SqlServer (column atau -SqlServer) wajib tersedia."
+            continue
+        }
+
+        $sourceDir = Join-Path (Join-Path (Join-Path $Root "TABULAR") (Sanitize-Name $modelDatabase)) "source_sql"
+        Ensure-Directory $sourceDir
+
+        foreach ($sourceQuery in $sourceQueries) {
+            $path = Join-Path $sourceDir $sourceQuery.File
+            if ((-not $Force) -and (Test-Path -LiteralPath $path)) {
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "SKIPPED" -Message "Artifact already exists." -Path $path
+                continue
+            }
+            if ($WhatIf) {
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "WHATIF" -Message "Query not executed." -Path $path
+                continue
+            }
+
+            $connection = $null
+            $command = $null
+            $adapter = $null
+            $table = $null
+            try {
+                $connectionString = "Data Source=$mappedSqlServer;Initial Catalog=$sourceDatabase;Integrated Security=True;Application Name=SSAS Evidence Collector;"
+                $connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
+                $connection.Open()
+                $command = $connection.CreateCommand()
+                $command.CommandText = $sourceQuery.Query
+                $command.CommandTimeout = $script:QueryTimeoutSeconds
+                $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
+                $table = New-Object System.Data.DataTable
+                [void]$adapter.Fill($table)
+                $rows = Export-TableCsv -Table $table -Path $path
+                $status = "SUCCESS"
+                $message = "Rows=$rows"
+                if ($rows -eq 0) { $status = "SUCCESS_EMPTY"; $message = "Query succeeded but returned 0 rows." }
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status $status -Message $message -Path $path
+            }
+            catch {
+                Add-ManifestRow -Manifest $Manifest -Server $mappedSqlServer -ServerType "SOURCE_SQL" -Database $modelDatabase -Category "SOURCE_SQL" -Artifact $sourceQuery.Name -Status "QUERY_FAILED_OR_UNSUPPORTED" -Message $_.Exception.Message -Path $path
+            }
+            finally {
+                if ($null -ne $adapter) { try { $adapter.Dispose() } catch {} }
+                if ($null -ne $command) { try { $command.Dispose() } catch {} }
+                if ($null -ne $table) { try { $table.Dispose() } catch {} }
+                if ($null -ne $connection) { try { $connection.Close() } catch {}; try { $connection.Dispose() } catch {} }
+            }
+        }
+    }
+}
+
 function Export-TabularTmsl {
     param(
         [System.Collections.ArrayList]$Manifest,
@@ -410,6 +593,23 @@ function Export-TabularTmsl {
         [string]$DatabaseName,
         [string]$OutputPath
     )
+
+    if ((-not $Force) -and (Test-Path -LiteralPath $OutputPath)) {
+        Add-ManifestRow `
+            -Manifest $Manifest -Server $ServerName -ServerType "TABULAR" `
+            -Database $DatabaseName -Category "MODEL" -Artifact "database.tmsl.json" `
+            -Status "SKIPPED" -Message "Artifact already exists; use -Force only for intentional overwrite." `
+            -Path $OutputPath
+        return
+    }
+
+    if ($WhatIf) {
+        Add-ManifestRow `
+            -Manifest $Manifest -Server $ServerName -ServerType "TABULAR" `
+            -Database $DatabaseName -Category "MODEL" -Artifact "database.tmsl.json" `
+            -Status "WHATIF" -Message "TMSL not exported." -Path $OutputPath
+        return
+    }
 
     if (-not $script:TomAvailable) {
         Add-ManifestRow `
@@ -439,7 +639,8 @@ function Export-TabularTmsl {
 
         $json = [Microsoft.AnalysisServices.Tabular.JsonScripter]::ScriptCreateOrReplace($db)
 
-        $json | Set-Content -Path $OutputPath -Encoding UTF8
+        $json = Protect-SensitiveText $json
+        $json | Set-Content -LiteralPath $OutputPath -Encoding UTF8
 
         Add-ManifestRow `
             -Manifest $Manifest `
@@ -479,15 +680,28 @@ function Export-TabularTmsl {
 # START
 # ------------------------------------------------------------
 
-Write-Host "SSAS Collector v1.6 (PowerShell 4.0 compatible)"
-Import-SSASLibraries
+$minimumPowerShell = New-Object Version 4,0
+if ($PSVersionTable.PSVersion -lt $minimumPowerShell) {
+    throw ("PowerShell 4.0 atau lebih baru diperlukan. Versi aktif: " + $PSVersionTable.PSVersion)
+}
 
-if (-not (Test-Path $ConfigPath)) {
+$scriptPath = $MyInvocation.MyCommand.Path
+$scriptDirectory = ""
+if ($scriptPath) { $scriptDirectory = Split-Path -Parent $scriptPath }
+if (-not $scriptDirectory) { $scriptDirectory = (Get-Location).Path }
+if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) {
+    $ConfigPath = Join-Path $scriptDirectory $ConfigPath
+}
+
+Write-Host ("SSAS Evidence Collector v" + $script:CollectorVersion + " (PowerShell 4.0 compatible)")
+Import-SSASLibraries -RequestedAdomdPath $AdomdClientPath
+
+if (-not (Test-Path -LiteralPath $ConfigPath)) {
     throw "Config file tidak ditemukan: $ConfigPath"
 }
 
 $configFull = (Resolve-Path $ConfigPath).Path
-$config = Get-Content $configFull -Raw | ConvertFrom-Json
+$config = Get-Content -LiteralPath $configFull -Raw | ConvertFrom-Json
 $configDir = Split-Path $configFull -Parent
 
 $script:QueryTimeoutSeconds = 60
@@ -502,13 +716,19 @@ if ($null -ne $config.query_timeout_seconds) {
 
 Write-Info ("Query timeout: " + $script:QueryTimeoutSeconds + " seconds")
 
-$outputRoot = [string]$config.output_root
+$configuredAssessmentId = [string]$config.assessment_id
+if (-not $AssessmentId) { $AssessmentId = $configuredAssessmentId }
+if (-not $AssessmentId) { throw "AssessmentId tidak boleh kosong." }
+if ($AssessmentId -match '[\\/:*?\"<>|]') { throw "AssessmentId mengandung karakter path yang tidak valid." }
+
+if (-not $OutputRoot) { $OutputRoot = [string]$config.output_root }
+$outputRoot = $OutputRoot
 
 if (-not [System.IO.Path]::IsPathRooted($outputRoot)) {
     $outputRoot = Join-Path $configDir $outputRoot
 }
 
-$assessmentRoot = Join-Path $outputRoot ([string]$config.assessment_id)
+$assessmentRoot = Join-Path $outputRoot $AssessmentId
 
 Ensure-Directory $assessmentRoot
 Ensure-Directory (Join-Path $assessmentRoot "MANIFEST")
@@ -525,6 +745,7 @@ $tabularMetadata = @{
     hierarchies   = 'SELECT * FROM $SYSTEM.TMSCHEMA_HIERARCHIES'
     levels        = 'SELECT * FROM $SYSTEM.TMSCHEMA_LEVELS'
     roles         = 'SELECT * FROM $SYSTEM.TMSCHEMA_ROLES'
+    refresh_policies = 'SELECT * FROM $SYSTEM.TMSCHEMA_REFRESH_POLICIES'
 }
 
 $tabularStorage = @{
@@ -535,6 +756,7 @@ $tabularStorage = @{
 }
 
 $multidimMetadata = @{
+    catalogs       = 'SELECT * FROM $SYSTEM.DBSCHEMA_CATALOGS'
     cubes          = 'SELECT * FROM $SYSTEM.MDSCHEMA_CUBES'
     dimensions     = 'SELECT * FROM $SYSTEM.MDSCHEMA_DIMENSIONS'
     hierarchies    = 'SELECT * FROM $SYSTEM.MDSCHEMA_HIERARCHIES'
@@ -543,10 +765,13 @@ $multidimMetadata = @{
     measure_groups = 'SELECT * FROM $SYSTEM.MDSCHEMA_MEASUREGROUPS'
     sets           = 'SELECT * FROM $SYSTEM.MDSCHEMA_SETS'
     functions      = 'SELECT * FROM $SYSTEM.MDSCHEMA_FUNCTIONS'
+    properties     = 'SELECT * FROM $SYSTEM.MDSCHEMA_PROPERTIES'
+    kpis           = 'SELECT * FROM $SYSTEM.MDSCHEMA_KPIS'
 }
 
 $multidimStorage = @{
-    storage_tables = 'SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLES'
+    storage_tables  = 'SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLES'
+    partition_stats = 'SELECT * FROM $SYSTEM.DISCOVER_PARTITION_STAT'
 }
 
 $serverRuntime = @{
@@ -644,7 +869,7 @@ foreach ($srv in $config.servers) {
                 -Category "SERVER_RUNTIME" `
                 -Artifact "memory_usage" `
                 -Status "SKIPPED" `
-                -Message "Disabled by default because server-wide DISCOVER_OBJECT_MEMORY_USAGE can be very expensive. Database-level collection remains enabled." `
+                -Message "Disabled by default because server-wide DISCOVER_OBJECT_MEMORY_USAGE can be very expensive." `
                 -Path (Join-Path $runtimeDir "memory_usage.csv")
 
             Write-Info "SKIPPED server-wide memory_usage (safe default)"
@@ -681,6 +906,7 @@ foreach ($srv in $config.servers) {
             Ensure-Directory $metaDir
             Ensure-Directory $storageDir
             Ensure-Directory $modelDir
+            Export-CollectionMetadata -Server $serverName -ServerType $serverType -Database $dbName -Path (Join-Path $dbRoot "collection_metadata.json")
 
             if ($config.collect.database_metadata -eq $true) {
 
@@ -761,6 +987,7 @@ foreach ($srv in $config.servers) {
 
             Ensure-Directory $metaDir
             Ensure-Directory $storageDir
+            Export-CollectionMetadata -Server $serverName -ServerType $serverType -Database $dbName -Path (Join-Path $dbRoot "collection_metadata.json")
 
             if ($config.collect.database_metadata -eq $true) {
 
@@ -838,37 +1065,96 @@ foreach ($srv in $config.servers) {
     }
 }
 
+Collect-SourceSqlEvidence -Manifest $manifest -MapPath $SourceMapPath -DefaultSqlServer $SqlServer -Root $assessmentRoot
+
 $dbInventory |
     Select-Object Server,ServerType,Database,Selected |
     Export-Csv `
-        -Path (Join-Path $assessmentRoot "MANIFEST\databases.csv") `
+        -LiteralPath (Join-Path $assessmentRoot "MANIFEST\databases.csv") `
         -NoTypeInformation `
         -Encoding UTF8
 
-$manifest |
+$manifestPath = Join-Path $assessmentRoot "MANIFEST\collection_manifest.csv"
+$oldManifest = @()
+$effectiveManifest = @($manifest | Where-Object {
+    -not ($_.Status -eq "SKIPPED" -and $_.Message -match '^Artifact already exists')
+})
+if ((Test-Path -LiteralPath $manifestPath) -and (-not $Force)) {
+    $newKeys = @($effectiveManifest | ForEach-Object { $_.Server + "|" + $_.Database + "|" + $_.Artifact })
+    $oldManifest = @(Import-Csv -LiteralPath $manifestPath | Where-Object {
+        $oldKey = $_.Server + "|" + $_.Database + "|" + $_.Artifact
+        $newKeys -notcontains $oldKey
+    })
+}
+$allManifest = @($oldManifest) + @($effectiveManifest)
+
+$allManifest |
     Select-Object CollectedAt,Server,ServerType,Database,Category,Artifact,Status,Message,Path |
     Export-Csv `
-        -Path (Join-Path $assessmentRoot "MANIFEST\collection_manifest.csv") `
+        -LiteralPath $manifestPath `
         -NoTypeInformation `
         -Encoding UTF8
 
-$successCount = @($manifest | Where-Object { ($_.Status -eq "SUCCESS") -or ($_.Status -eq "SUCCESS_EMPTY") }).Count
-$failedCount = @($manifest | Where-Object { $_.Status -ne "SUCCESS" }).Count
+$coverage = @($allManifest | Group-Object Server,ServerType,Database,Category | ForEach-Object {
+    $rows = @($_.Group)
+    $statuses = @($rows | Select-Object -ExpandProperty Status -Unique)
+    $successRows = @($rows | Where-Object { $_.Status -eq "SUCCESS" -or $_.Status -eq "SUCCESS_EMPTY" }).Count
+    $coverageStatus = "MISSING"
+    if ($successRows -eq $rows.Count) {
+        $coverageStatus = "COMPLETE"
+    }
+    elseif ($successRows -gt 0) {
+        $coverageStatus = "PARTIAL"
+    }
+    elseif (@($rows | Where-Object { $_.Status -eq "SKIPPED" }).Count -eq $rows.Count) {
+        $coverageStatus = "SKIPPED"
+    }
+    elseif (@($rows | Where-Object { $_.Message -match '^UNSUPPORTED:' }).Count -eq $rows.Count) {
+        $coverageStatus = "UNSUPPORTED"
+    }
+
+    New-Object PSObject -Property @{
+        Server = $rows[0].Server
+        ServerType = $rows[0].ServerType
+        Database = $rows[0].Database
+        Category = $rows[0].Category
+        Coverage = $coverageStatus
+        ArtifactCount = $rows.Count
+        Statuses = ($statuses -join ";")
+    }
+})
+$coverage | Select-Object Server,ServerType,Database,Category,Coverage,ArtifactCount,Statuses |
+    Export-Csv -LiteralPath (Join-Path $assessmentRoot "MANIFEST\coverage.csv") -NoTypeInformation -Encoding UTF8
+
+$successCount = @($allManifest | Where-Object { ($_.Status -eq "SUCCESS") -or ($_.Status -eq "SUCCESS_EMPTY") }).Count
+$skippedCount = @($allManifest | Where-Object { $_.Status -eq "SKIPPED" }).Count
+$whatIfCount = @($allManifest | Where-Object { $_.Status -eq "WHATIF" }).Count
+$failedCount = @($allManifest | Where-Object { ($_.Status -ne "SUCCESS") -and ($_.Status -ne "SUCCESS_EMPTY") -and ($_.Status -ne "SKIPPED") -and ($_.Status -ne "WHATIF") }).Count
+$tabularDatabaseCount = @($dbInventory | Where-Object { $_.ServerType -eq "TABULAR" -and $_.Selected }).Count
+$multidimDatabaseCount = @($dbInventory | Where-Object { $_.ServerType -eq "MULTIDIMENSIONAL" -and $_.Selected }).Count
 
 $summary = New-Object PSObject -Property @{
-    assessment_id        = [string]$config.assessment_id
+    assessment_id        = $AssessmentId
+    collector             = "Collect-SSAS.ps1"
+    collector_version     = $script:CollectorVersion
+    collection_started_at_utc = $script:CollectionStartedAtUtc.ToString("o")
+    collection_finished_at_utc = [DateTime]::UtcNow.ToString("o")
     collected_at         = (Get-Date).ToString("s")
     powershell_version   = $PSVersionTable.PSVersion.ToString()
     tom_available        = $script:TomAvailable
-    total_artifacts      = $manifest.Count
+    total_artifacts      = $allManifest.Count
     success              = $successCount
+    skipped              = $skippedCount
+    whatif               = $whatIfCount
     failed_or_unsupported = $failedCount
+    tabular_databases    = $tabularDatabaseCount
+    multidimensional_databases = $multidimDatabaseCount
 }
 
 $summary |
     ConvertTo-Json -Depth 5 |
     Set-Content `
-        -Path (Join-Path $assessmentRoot "MANIFEST\summary.json") `
+        -LiteralPath (Join-Path $assessmentRoot "MANIFEST\summary.json") `
         -Encoding UTF8
 
 Write-Host ""
