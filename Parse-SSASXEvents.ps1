@@ -311,6 +311,39 @@ function Correlate-Multidimensional([object[]]$Events) {
     return $result
 }
 
+function Get-ErrorClassification([string]$Text) {
+    if (-not $Text) { return 'NO_TEXT' }
+    if ($Text -match '(?i)permission|denied|unauthorized|not authorized') { return 'PERMISSION_OR_AUTHORIZATION' }
+    if ($Text -match '(?i)not recognized|not supported|unsupported') { return 'UNSUPPORTED_OR_UNRECOGNIZED' }
+    if ($Text -match '(?i)syntax|parser|parse error') { return 'SYNTAX_OR_PARSER' }
+    if ($Text -match '(?i)not found|does not exist|cannot find|unknown object') { return 'OBJECT_NOT_FOUND' }
+    if ($Text -match '(?i)timeout|timed out') { return 'TIMEOUT' }
+    if ($Text -match '(?i)cancel|canceled|cancelled') { return 'CANCELLED' }
+    return 'OTHER_REQUIRES_REVIEW'
+}
+
+function Get-ErrorSummary([object[]]$Events, [string]$EngineType) {
+    $result = New-Object System.Collections.Generic.List[object]
+    $errors = @($Events | Where-Object { $_.EventName -ieq 'Error' })
+    foreach ($group in @($errors | Group-Object DatabaseName,TextHashSHA256,EventSubclass)) {
+        $ordered = @($group.Group | Sort-Object { [DateTime]$_.Timestamp })
+        $first = $ordered | Select-Object -First 1
+        $last = $ordered | Select-Object -Last 1
+        $result.Add((New-Object PSObject -Property @{
+            EngineType = $EngineType
+            DatabaseName = $first.DatabaseName
+            ErrorHashSHA256 = $first.TextHashSHA256
+            EventSubclass = $first.EventSubclass
+            Count = $group.Count
+            FirstTimestamp = $first.Timestamp
+            LastTimestamp = $last.Timestamp
+            Classification = Get-ErrorClassification ([string]$first.TextData)
+            SourceFileCount = @($group.Group.SourceFile | Sort-Object -Unique).Count
+        }))
+    }
+    return $result
+}
+
 function Export-Rows([object[]]$Rows, [string]$Path, [string[]]$Columns) {
     if ((Test-Path -LiteralPath $Path) -and (-not $Force)) {
         throw ("Output sudah ada: " + $Path + ". Gunakan RunId baru atau -Force.")
@@ -347,17 +380,22 @@ $mdEvents = @(Read-XEvents $multidimensionalFiles "MULTIDIMENSIONAL")
 Resolve-TabularActivityIds $tabularEvents
 $tabularQueries = @(Correlate-Tabular $tabularEvents)
 $mdQueries = @(Correlate-Multidimensional $mdEvents)
+$tabularErrors = @(Get-ErrorSummary $tabularEvents 'TABULAR')
+$mdErrors = @(Get-ErrorSummary $mdEvents 'MULTIDIMENSIONAL')
 
 Export-Rows $tabularEvents (Join-Path $tabularOutput "events.csv") $eventColumns
 Export-Rows $tabularQueries (Join-Path $tabularOutput "queries.csv") $tabularQueryColumns
 Export-Rows $mdEvents (Join-Path $multidimensionalOutput "events.csv") $eventColumns
 Export-Rows $mdQueries (Join-Path $multidimensionalOutput "queries.csv") $mdQueryColumns
+$errorColumns = @('EngineType','DatabaseName','ErrorHashSHA256','EventSubclass','Count','FirstTimestamp','LastTimestamp','Classification','SourceFileCount')
+Export-Rows $tabularErrors (Join-Path $tabularOutput 'error_summary.csv') $errorColumns
+Export-Rows $mdErrors (Join-Path $multidimensionalOutput 'error_summary.csv') $errorColumns
 
 $manifest = @(
-    New-Object PSObject -Property @{ EngineType="TABULAR"; InputFolder=$TabularXelPath; XelFileCount=$tabularFiles.Count; EventCount=$tabularEvents.Count; CorrelatedQueryCount=$tabularQueries.Count; EventsPath=(Join-Path $tabularOutput "events.csv"); QueriesPath=(Join-Path $tabularOutput "queries.csv") }
-    New-Object PSObject -Property @{ EngineType="MULTIDIMENSIONAL"; InputFolder=$MultidimensionalXelPath; XelFileCount=$multidimensionalFiles.Count; EventCount=$mdEvents.Count; CorrelatedQueryCount=$mdQueries.Count; EventsPath=(Join-Path $multidimensionalOutput "events.csv"); QueriesPath=(Join-Path $multidimensionalOutput "queries.csv") }
+    New-Object PSObject -Property @{ EngineType="TABULAR"; InputFolder=$TabularXelPath; XelFileCount=$tabularFiles.Count; EventCount=$tabularEvents.Count; CorrelatedQueryCount=$tabularQueries.Count; ErrorCount=@($tabularEvents|Where-Object EventName -eq 'Error').Count; EventsPath=(Join-Path $tabularOutput "events.csv"); QueriesPath=(Join-Path $tabularOutput "queries.csv"); ErrorSummaryPath=(Join-Path $tabularOutput 'error_summary.csv') }
+    New-Object PSObject -Property @{ EngineType="MULTIDIMENSIONAL"; InputFolder=$MultidimensionalXelPath; XelFileCount=$multidimensionalFiles.Count; EventCount=$mdEvents.Count; CorrelatedQueryCount=$mdQueries.Count; ErrorCount=@($mdEvents|Where-Object EventName -eq 'Error').Count; EventsPath=(Join-Path $multidimensionalOutput "events.csv"); QueriesPath=(Join-Path $multidimensionalOutput "queries.csv"); ErrorSummaryPath=(Join-Path $multidimensionalOutput 'error_summary.csv') }
 )
-$manifest | Select-Object EngineType,InputFolder,XelFileCount,EventCount,CorrelatedQueryCount,EventsPath,QueriesPath |
+$manifest | Select-Object EngineType,InputFolder,XelFileCount,EventCount,CorrelatedQueryCount,ErrorCount,EventsPath,QueriesPath,ErrorSummaryPath |
     Export-Csv -LiteralPath (Join-Path $runRoot "parser_manifest.csv") -NoTypeInformation -Encoding UTF8
 
 $summary = New-Object PSObject -Property @{
@@ -371,6 +409,8 @@ $summary = New-Object PSObject -Property @{
     multidimensional_xel_files = $multidimensionalFiles.Count
     multidimensional_events = $mdEvents.Count
     multidimensional_correlated_queries = $mdQueries.Count
+    tabular_errors = @($tabularEvents | Where-Object EventName -eq 'Error').Count
+    multidimensional_errors = @($mdEvents | Where-Object EventName -eq 'Error').Count
 }
 $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $runRoot "summary.json") -Encoding UTF8
 

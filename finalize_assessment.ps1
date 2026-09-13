@@ -56,6 +56,9 @@ $systemTabular = @($tabularQueries | Where-Object { Is-SystemQuery $_ })
 $unscoped = @($tabularQueries | Where-Object { -not $_.DatabaseName -and -not (Is-SystemQuery $_) })
 $systemMd = @($mdQueries | Where-Object { Is-SystemQuery $_ })
 $businessMd = @($mdQueries | Where-Object { -not (Is-SystemQuery $_) })
+$tabularMatched = @($tabularQueries | Where-Object { $_.CorrelationQuality -eq 'MATCHED_BY_REQUEST_ID_WITH_ACTIVITY_ID' }).Count
+$tabularSeExceeds = @($tabularQueries | Where-Object { $_.CorrelationQuality -eq 'MATCHED_SE_SUM_EXCEEDS_TOTAL' }).Count
+$tabularQueryOnly = @($tabularQueries | Where-Object { $_.CorrelationQuality -eq 'QUERY_ONLY_NO_SE_EVENT' }).Count
 
 $runtimeRows = New-Object System.Collections.Generic.List[object]
 foreach ($group in @($business | Group-Object DatabaseName)) {
@@ -140,7 +143,7 @@ foreach ($runtime in @($runtimeRows | Select-Object -First 6)) {
         FindingID=("F-{0:D3}" -f $nextFinding); Database=$runtime.Database; Category="Runtime workload"
         Severity=$severity; Classification="OBSERVED"; Confidence="HIGH"
         Observation=("Captured BUSINESS_CANDIDATE subset: {0} executions, total {1} ms, P50/P95/P99 {2}/{3}/{4} ms, max {5} ms." -f $runtime.Executions,$runtime.TotalDurationMs,$runtime.P50DurationMs,$runtime.P95DurationMs,$runtime.P99DurationMs,$runtime.MaxDurationMs)
-        EvidenceFiles="results/XEvents/FINAL-XEL-20260911-ALL-V2/Tabular/queries.csv; REPORTS/07_RUNTIME_DATABASE_BASELINE.csv; REPORTS/08_RUNTIME_QUERY_HASH_BASELINE.csv"
+        EvidenceFiles="parsed XEvent Tabular/queries.csv; REPORTS/07_RUNTIME_DATABASE_BASELINE.csv; REPORTS/08_RUNTIME_QUERY_HASH_BASELINE.csv"
         Analysis="This database contributes a material share of candidate query duration in the captured window. The trace is collector-contaminated and business-cycle representativeness is not established."
         PerformanceImpact="Measured duration exists for captured query hashes; typical user latency and root cause are NOT PROVABLE FROM CURRENT EVIDENCE."
         Recommendation="Reproduce the highest-total query hashes with business owners; collect at least three comparable warm runs and Server Timings before changing DAX/model design."
@@ -221,7 +224,7 @@ $(($topStatic | ForEach-Object { $rank=[array]::IndexOf($topStatic,$_)+1; "| $ra
 - Tabular correlated queries: $($tabularQueries.Count).
 - SYSTEM_DMV: $($systemTabular.Count); BUSINESS_CANDIDATE: $($business.Count); unscoped non-system: $($unscoped.Count).
 - Multidimensional correlated queries: $($mdQueries.Count); SYSTEM_DMV: $($systemMd.Count); BUSINESS_CANDIDATE: $($businessMd.Count).
-- Tabular correlation quality: 741 matched with SE, 114 SE-sum-exceeds-total, and 2,959 query-only/no-SE across the full trace. `FEMsDerived` is not authoritative for the latter two classes.
+- Tabular correlation quality: $tabularMatched matched with SE, $tabularSeExceeds SE-sum-exceeds-total, and $tabularQueryOnly query-only/no-SE across the full trace. `FEMsDerived` is not authoritative for the latter two classes.
 
 ## Runtime database baseline
 

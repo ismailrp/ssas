@@ -287,3 +287,26 @@ ambil 3–5 query MDX nyata dan 2–3 processing normal menggunakan window serta
 yang sesuai. Gunakan event `QueryBegin`, `QueryEnd`, `CommandBegin`, `CommandEnd`,
 `ProgressReportBegin`, `ProgressReportEnd`, dan `Error`, dengan filter database/waktu
 sempit. Jangan menjalankan processing khusus hanya untuk mengisi assessment.
+
+## 11. Generate report finding SSAS per database
+
+Setelah `02_FLEET_SCORECARD.csv`, `04_FINDINGS.csv`, `06_DEEP_DIVE_PLAN.md`, dan
+`07_RUNTIME_DATABASE_BASELINE.csv` diperbarui, generate satu DOCX editable untuk setiap
+deep-dive candidate:
+
+```powershell
+.\generate_ssas_finding_docx.ps1 `
+  -TemplatePath '.\SSIS Finding-002-Seq_Staging_SIGAP_dtsx-Sequence Table Sigap v1.0a.docx' `
+  -ReportRoot '.\REPORTS' `
+  -OutputDirectory '.\REPORTS\SSAS_FINDING_DOCX'
+```
+
+Template SSIS hanya menyediakan container OpenXML dan style. Generator mengganti isi
+serta metadata dokumen dengan evidence SSAS dan tidak menyalin temuan, durasi, target,
+nama package, atau rekomendasi SSIS. Output mengikuti urutan maksimal delapan database
+pada `06_DEEP_DIVE_PLAN.md` dan dilengkapi `index.csv`.
+
+Setiap dokumen memuat klasifikasi `OBSERVED`, `INFERRED`, atau `REQUIRES VALIDATION`,
+evidence files, action plan, benefit, effort, risk, dan tabel before/after. Target durasi
+atau persentase tidak diisi sebelum baseline comparable dan acceptance threshold bisnis
+disepakati.

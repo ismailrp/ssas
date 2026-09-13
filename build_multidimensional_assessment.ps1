@@ -1,7 +1,8 @@
 <# Generates a separate Multidimensional scorecard and assessment. Windows PowerShell 4.0 compatible. #>
 param(
     [string]$EvidenceRoot = '',
-    [string]$ReportRoot = ''
+    [string]$ReportRoot = '',
+    [string]$RuntimeRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +27,29 @@ function Rank-Percentile([object[]]$Values, [double]$Value) {
     $equal=@($Values | Where-Object {[double]$_ -eq $Value}).Count
     return [math]::Round(100 * ($below + (0.5 * $equal)) / $Values.Count)
 }
+function Percentile([object[]]$Values, [double]$Fraction) {
+    $sorted=@($Values | ForEach-Object {[double]$_} | Sort-Object)
+    if ($sorted.Count -eq 0) { return '' }
+    $index=[math]::Ceiling($Fraction*$sorted.Count)-1
+    if ($index -lt 0) { $index=0 }
+    return $sorted[$index]
+}
+
+if (-not $RuntimeRoot) {
+    $runtimeBase=Join-Path $EvidenceRoot 'RUNTIME'
+    if (Test-Path -LiteralPath $runtimeBase) {
+        $candidate=Get-ChildItem -LiteralPath $runtimeBase -Directory | Sort-Object LastWriteTime -Descending | Where-Object {
+            Test-Path -LiteralPath (Join-Path $_.FullName 'Multidimensional\queries.csv')
+        } | Select-Object -First 1
+        if ($candidate) { $RuntimeRoot=$candidate.FullName }
+    }
+}
+$runtimeQueries=@()
+$runtimeEvents=@()
+if ($RuntimeRoot) {
+    $runtimeQueries=Csv (Join-Path $RuntimeRoot 'Multidimensional\queries.csv')
+    $runtimeEvents=Csv (Join-Path $RuntimeRoot 'Multidimensional\events.csv')
+}
 
 $inventory = Csv (Join-Path $EvidenceRoot 'MANIFEST\databases.csv')
 $multi = @($inventory | Where-Object { $_.ServerType -eq 'MULTIDIMENSIONAL' })
@@ -33,15 +57,15 @@ $rows = @()
 foreach ($item in $multi) {
     $name=[string]$item.Database
     $base=Join-Path (Join-Path (Join-Path $EvidenceRoot 'MULTIDIMENSIONAL') (Safe-Name $name)) 'metadata_extended'
-    $partitions=Csv (Join-Path $base 'partitions.csv')
-    $usage=Csv (Join-Path $base 'dimension_usage.csv')
-    $attributes=Csv (Join-Path $base 'dimension_attributes.csv')
-    $relationships=Csv (Join-Path $base 'attribute_relationships.csv')
-    $hierarchies=Csv (Join-Path $base 'user_hierarchies.csv')
-    $designs=Csv (Join-Path $base 'aggregation_designs.csv')
-    $aggregations=Csv (Join-Path $base 'aggregations.csv')
-    $calculations=Csv (Join-Path $base 'calculations.csv')
-    $roles=Csv (Join-Path $base 'roles.csv')
+    $partitions=@(Csv (Join-Path $base 'partitions.csv'))
+    $usage=@(Csv (Join-Path $base 'dimension_usage.csv'))
+    $attributes=@(Csv (Join-Path $base 'dimension_attributes.csv'))
+    $relationships=@(Csv (Join-Path $base 'attribute_relationships.csv'))
+    $hierarchies=@(Csv (Join-Path $base 'user_hierarchies.csv'))
+    $designs=@(Csv (Join-Path $base 'aggregation_designs.csv'))
+    $aggregations=@(Csv (Join-Path $base 'aggregations.csv'))
+    $calculations=@(Csv (Join-Path $base 'calculations.csv'))
+    $roles=@(Csv (Join-Path $base 'roles.csv'))
     $required=@('partitions.csv','dimension_usage.csv','dimension_attributes.csv','attribute_relationships.csv','user_hierarchies.csv','aggregation_designs.csv','aggregations.csv','calculations.csv')
     $missingRequired=@($required | Where-Object {-not (Test-Path -LiteralPath (Join-Path $base $_))})
     $estimated=@($partitions | ForEach-Object { Number $_.EstimatedRows } | Where-Object {$_ -gt 0})
@@ -49,6 +73,14 @@ foreach ($item in $multi) {
     $totalEstimated=if($estimated.Count){($estimated | Measure-Object -Sum).Sum}else{0}
     $withoutDesign=@($partitions | Where-Object {-not $_.AggregationDesignID}).Count
     $metadataPresent=(Test-Path -LiteralPath $base)
+    $dbRuntime=@($runtimeQueries | Where-Object {$_.DatabaseName -eq $name})
+    $dbBusinessRuntime=@($dbRuntime | Where-Object {
+        $text=[string]$_.QueryText
+        $text -notmatch '(?i)DISCOVER_|MDSCHEMA_|DBSCHEMA_|SYSTEMRESTRICTSCHEMA'
+    })
+    $dbRuntimeEvents=@($runtimeEvents | Where-Object {$_.DatabaseName -eq $name})
+    $durations=@($dbRuntime | ForEach-Object {Number $_.TotalMs})
+    $runtimeCoverage=if($dbRuntime.Count -eq 0){'MISSING'}elseif($dbBusinessRuntime.Count -eq 0){'METADATA_ONLY'}else{'PARTIAL'}
     $rows += [pscustomobject]@{
         Database=$name; EvidenceCoverage=$(if(-not $metadataPresent){'MISSING'}elseif($missingRequired.Count){'PARTIAL'}else{'COMPLETE'})
         PartitionCount=$partitions.Count; MeasureGroupDimensionUsageCount=$usage.Count
@@ -58,7 +90,16 @@ foreach ($item in $multi) {
         MaxPartitionEstimatedRows=[long]$maxEstimated; TotalPartitionEstimatedRows=[long]$totalEstimated
         PartitionsWithoutAggregationDesign=$withoutDesign
         LastProcessedKnownCount=@($partitions | Where-Object {$_.LastProcessed}).Count
-        RuntimeCoverage='MISSING'; ProcessingHistoryCoverage='MISSING'
+        RuntimeCoverage=$runtimeCoverage; RuntimeExecutions=$dbRuntime.Count; BusinessRuntimeExecutions=$dbBusinessRuntime.Count
+        RuntimeDistinctHashes=@($dbRuntime.QueryHashSHA256 | Where-Object {$_} | Select-Object -Unique).Count
+        RuntimeTotalMs=$(if($durations.Count){[math]::Round(($durations|Measure-Object -Sum).Sum,2)}else{''})
+        RuntimeP50Ms=$(Percentile $durations 0.50); RuntimeP95Ms=$(Percentile $durations 0.95); RuntimeP99Ms=$(Percentile $durations 0.99)
+        RuntimeMaxMs=$(if($durations.Count){($durations|Measure-Object -Maximum).Maximum}else{''})
+        RuntimeStart=$(if($dbRuntime.Count){($dbRuntime|Sort-Object QueryEndTimestamp|Select-Object -First 1).QueryEndTimestamp}else{''})
+        RuntimeEnd=$(if($dbRuntime.Count){($dbRuntime|Sort-Object QueryEndTimestamp|Select-Object -Last 1).QueryEndTimestamp}else{''})
+        RuntimeErrorEvents=@($dbRuntimeEvents | Where-Object {$_.EventName -eq 'Error'}).Count
+        ProcessingEventCount=@($dbRuntimeEvents | Where-Object {$_.EventName -match '^(Command|ProgressReport)'}).Count
+        ProcessingHistoryCoverage=$(if(@($dbRuntimeEvents | Where-Object {$_.EventName -match '^(Command|ProgressReport)'}).Count){'PARTIAL'}else{'MISSING'})
     }
 }
 
@@ -106,9 +147,14 @@ $manifest=Csv (Join-Path $EvidenceRoot 'MANIFEST\multidimensional_collection_man
 $manifestSummary=if($manifest.Count){($manifest | Group-Object Status | ForEach-Object { $_.Name+'='+$_.Count }) -join ', '}else{'extended collector has not been run'}
 $tableRows = if ($rows.Count) {
     ($rows | Sort-Object OverallScore -Descending | ForEach-Object {
-        "| $(Escape-Md $_.Database) | $($_.EvidenceCoverage) | $($_.PartitionCount) | $($_.DimensionAttributeCount) | $($_.AttributeRelationshipCount) | $($_.AggregationCount) | $($_.CalculationCommandCount) | $($_.OverallScore) | $($_.RiskLevel)/$($_.Priority) |"
+        "| $(Escape-Md $_.Database) | $($_.EvidenceCoverage) | $($_.RuntimeCoverage) | $($_.RuntimeExecutions) | $($_.BusinessRuntimeExecutions) | $($_.PartitionCount) | $($_.DimensionAttributeCount) | $($_.AggregationCount) | $($_.OverallScore) | $($_.RiskLevel)/$($_.Priority) |"
     }) -join "`n"
-} else { '| — | MISSING | — | — | — | — | — | — | INFORMATIONAL |' }
+} else { '| — | MISSING | MISSING | — | — | — | — | — | — | INFORMATIONAL |' }
+$runtimeRows = if ($rows.Count) {
+    ($rows | Sort-Object Database | ForEach-Object {
+        "| $(Escape-Md $_.Database) | $($_.RuntimeCoverage) | $($_.RuntimeExecutions) | $($_.RuntimeDistinctHashes) | $($_.RuntimeTotalMs) | $($_.RuntimeP50Ms) | $($_.RuntimeP95Ms) | $($_.RuntimeP99Ms) | $($_.RuntimeMaxMs) | $($_.RuntimeErrorEvents) | $($_.ProcessingEventCount) |"
+    }) -join "`n"
+} else { '| — | MISSING | — | — | — | — | — | — | — | — | — |' }
 
 $report=@"
 # SSAS Multidimensional Assessment
@@ -117,11 +163,19 @@ $report=@"
 
 This assessment is separate from the Tabular/VertiPaq score. It covers $($rows.Count) Multidimensional databases. Extended collector manifest: **$manifestSummary**.
 
-| Database | Coverage | Partitions | Dimension attributes | Attribute relationships | Aggregations | MDX command hashes | Score | Risk/Priority |
-|---|---|---:|---:|---:|---:|---:|---:|---|
+| Database | Static coverage | Runtime coverage | Captured queries | Business queries | Partitions | Dimension attributes | Aggregations | Score | Risk/Priority |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
 $tableRows
 
 The score is a fleet-relative prioritization signal across Multidimensional models, not measured latency. With only $($rows.Count) models, percentile separation is directional and must not be treated as an absolute health rating.
+
+## Parsed XEvent runtime
+
+| Database | Coverage | Queries | Hashes | Total ms | P50 | P95 | P99 | Max | Error events | Processing events |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+$runtimeRows
+
+The captured durations above describe metadata/schema discovery traffic when coverage is `METADATA_ONLY`. They must not be presented as business-query latency. No `Command*` or `ProgressReport*` event means processing duration remains unavailable.
 
 ## Methodology
 
@@ -135,6 +189,7 @@ The score is a fleet-relative prioritization signal across Multidimensional mode
 ## Current conclusions
 
 - Static metadata can identify candidates for dimension, partition, aggregation, and MDX review.
+- `METADATA_ONLY` runtime means XEvent queries were DMV/schema discovery calls, not representative MDX business workload.
 - Query latency, cache effectiveness, aggregation hit rate, processing bottlenecks, CPU pressure, and memory pressure are **NOT PROVABLE FROM CURRENT EVIDENCE**.
 - No partition, aggregation, hierarchy, calculation, role, or source object should be changed from this report alone.
 
