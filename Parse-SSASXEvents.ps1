@@ -236,7 +236,17 @@ function Correlate-Multidimensional([object[]]$Events) {
     $result = New-Object System.Collections.Generic.List[object]
 
     foreach ($group in $groups) {
-        $ordered = @($group.Group | Sort-Object Timestamp)
+        # Some Multidimensional events share the exact same timestamp.  Use an
+        # explicit event-order tie breaker so QueryEnd is never processed before
+        # its QueryBegin on Windows PowerShell versions where Sort-Object is not
+        # stable for equal keys.
+        $ordered = @($group.Group | Sort-Object `
+            @{ Expression = { [DateTime]$_.Timestamp } }, `
+            @{ Expression = {
+                if ($_.EventName -ieq "QueryBegin") { return 0 }
+                if ($_.EventName -ieq "QueryEnd") { return 2 }
+                return 1
+            } })
         $pending = New-Object System.Collections.Generic.List[object]
         $windows = New-Object System.Collections.Generic.List[object]
 

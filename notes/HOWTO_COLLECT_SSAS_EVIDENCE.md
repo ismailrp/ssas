@@ -224,3 +224,66 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 Laporan harus tetap membedakan `OBSERVED`, `INFERRED`, dan `REQUIRES VALIDATION`. Bila bukti runtime atau processing belum tersedia, gunakan:
 
 > `NOT PROVABLE FROM CURRENT EVIDENCE`
+
+## 10. Multidimensional extended evidence
+
+`Collect-SSAS.ps1` tetap menjadi collector fleet utama. Untuk cube Multidimensional,
+jalankan add-on read-only setelah collector utama selesai. Add-on ini tidak melakukan
+processing, clear cache, deploy, atau mengaktifkan trace.
+
+Disarankan memakai assessment ID/evidence root baru agar timestamp dan collector
+version tidak bercampur dengan evidence lama. Add-on membuat atau melengkapi
+`MANIFEST/databases.csv` untuk database Multidimensional yang berhasil ditemukan, jadi
+manifest tidak perlu disalin manual. Jangan membuat source-map dummy.
+
+Contoh collection untuk semua database Multidimensional pada server di `config.json`:
+
+```powershell
+.\collect_multidimensional_evidence.ps1 `
+  -EvidenceRoot .\evidence\EVSET-006
+```
+
+Contoh targeted collection untuk dua database:
+
+```powershell
+.\collect_multidimensional_evidence.ps1 `
+  -EvidenceRoot .\evidence\EVSET-006 `
+  -Server 'BGASVR-DWH-DEV' `
+  -Database 'Cube Sparta LHA','MultidimensionalProjectMR'
+```
+
+Default-nya artifact existing dilewati. Gunakan `-Force` hanya bila overwrite memang
+disengaja. Jika AMO tidak ditemukan otomatis, gunakan `-AmoPath` ke
+`Microsoft.AnalysisServices.dll`.
+
+Output tambahan berada pada:
+
+```text
+evidence/<EVSET>/MULTIDIMENSIONAL/<database>/metadata_extended/
+evidence/<EVSET>/MANIFEST/multidimensional_collection_manifest.csv
+```
+
+Connection string, account, dan query source tidak diekspor. Source query disimpan
+sebagai SHA-256 hash dan panjang teks saja. Definisi MDX juga disimpan sebagai hash dan
+panjang teks; review isi lengkap harus dilakukan melalui jalur evidence yang disetujui.
+
+Generate report Multidimensional secara terpisah:
+
+```powershell
+.\build_multidimensional_assessment.ps1 `
+  -EvidenceRoot .\evidence\EVSET-006 `
+  -ReportRoot .\REPORTS
+```
+
+Output:
+
+```text
+REPORTS/12_MULTIDIMENSIONAL_SCORECARD.csv
+REPORTS/13_MULTIDIMENSIONAL_ASSESSMENT.md
+```
+
+Report tersebut belum membuktikan query atau processing lambat. Untuk validasi runtime,
+ambil 3–5 query MDX nyata dan 2–3 processing normal menggunakan window serta approval
+yang sesuai. Gunakan event `QueryBegin`, `QueryEnd`, `CommandBegin`, `CommandEnd`,
+`ProgressReportBegin`, `ProgressReportEnd`, dan `Error`, dengan filter database/waktu
+sempit. Jangan menjalankan processing khusus hanya untuk mengisi assessment.

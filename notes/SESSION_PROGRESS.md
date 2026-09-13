@@ -8,7 +8,9 @@ Menyelesaikan assessment performa SSAS berbasis evidence yang mencakup fleet bas
 
 ## Status saat ini
 
-Pekerjaan sedang **HOLD atas permintaan user** karena file XEL tambahan masih akan dikumpulkan. Jangan memfinalisasi findings, ranking runtime, percentile, deep dive, atau action plan sebelum user menyatakan batch XEL sudah lengkap.
+Batch XEL tambahan sudah diparsing penuh dan assessment final sudah dibangun. Hasil parser authoritative adalah `results/XEvents/FINAL-XEL-20260911-ALL-V2/`; RunId tanpa suffix `V2` superseded karena tie timestamp pada korelasi Multidimensional. Output assessment berada di `REPORTS/`.
+
+Runtime Tabular berisi 3.814 query terkorrelasi: 2.946 diklasifikasikan system/DMV collector dan 868 sebagai `BUSINESS_CANDIDATE` pada 12 database. Seluruh 118 query Multidimensional adalah system/DMV. Runtime tidak dimasukkan ke overall score karena representativitas workload belum terbukti; ia dipakai sebagai sinyal pemilihan deep dive dengan classification dan caveat yang eksplisit.
 
 ### Evidence metadata utama
 
@@ -80,7 +82,7 @@ results/XEvents/<RunId>/
 
 Parser Tabular mengekstrak ActivityID dari `RequestProperties`, mempropagasikannya melalui RequestID, dan menghubungkan QueryEnd dengan VertiPaq/DirectQuery events. Parser Multidimensional memakai ConnectionID + SPID + timestamp window dan menandai overlap sebagai ambigu.
 
-Batch lama pernah divalidasi sebagai `results/XEvents/VALIDATION-20260911`, tetapi **jangan gunakan hasil tersebut sebagai runtime final** karena user sedang menambahkan XEL baru.
+Batch lama pernah divalidasi sebagai `results/XEvents/VALIDATION-20260911`, tetapi **jangan gunakan hasil tersebut sebagai runtime final**. Gunakan `results/XEvents/FINAL-XEL-20260911-ALL-V2/`.
 
 Validasi sementara batch lama:
 
@@ -154,4 +156,3 @@ Gunakan kalimat berikut jika evidence tetap tidak cukup:
 Panduan operasional terbaru: `notes/HOWTO_COLLECT_SSAS_EVIDENCE.md`.
 
 Folder `evidence/`, `results/`, dan `XEvents/` sudah dikecualikan melalui `.gitignore` karena dapat besar dan sensitif.
-

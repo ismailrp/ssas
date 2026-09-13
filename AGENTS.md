@@ -194,3 +194,6 @@ Gunakan kalimat berikut ketika evidence belum cukup:
 
 > `NOT PROVABLE FROM CURRENT EVIDENCE`
 
+## Tabular Editor CLI Skills
+Ketika pengguna meminta Anda untuk mengecek, memvalidasi, atau memodifikasi model SSAS/Tabular, Anda WAJIB membaca file "SKILLS.md" (atau @skills\te-cli\SKILLS.md) di direktori ini terlebih dahulu untuk memahami cara menggunakan tool te-cli.
+

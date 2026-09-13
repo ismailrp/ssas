@@ -1,7 +1,10 @@
-﻿param([string]$EvidenceRoot = (Join-Path $PSScriptRoot 'evidence\EVSET-001'))
+﻿param([string]$EvidenceRoot = '')
 $ErrorActionPreference = 'Stop'
+$scriptPath = $MyInvocation.MyCommand.Path
+$scriptDirectory = if($scriptPath){Split-Path -Parent $scriptPath}else{(Get-Location).Path}
+if(-not $EvidenceRoot){$EvidenceRoot=Join-Path $scriptDirectory 'evidence\EVSET-005'}
 $inv = [Globalization.CultureInfo]::InvariantCulture
-$reportRoot = Join-Path $EvidenceRoot 'REPORTS'
+$reportRoot = if($env:SSAS_ASSESSMENT_REPORT_ROOT){$env:SSAS_ASSESSMENT_REPORT_ROOT}else{Join-Path $EvidenceRoot 'REPORTS'}
 $dbReportRoot = Join-Path $reportRoot 'DATABASES'
 New-Item -ItemType Directory -Force -Path $dbReportRoot | Out-Null
 
@@ -24,6 +27,12 @@ function StatusClass($rows,$artifact) {
 
 $manifest=Csv (Join-Path $EvidenceRoot 'MANIFEST\collection_manifest.csv')
 $dbList=Csv (Join-Path $EvidenceRoot 'MANIFEST\databases.csv')
+$summaryPath=Join-Path $EvidenceRoot 'MANIFEST\summary.json'
+$summary=if(Test-Path -LiteralPath $summaryPath){Get-Content -LiteralPath $summaryPath -Raw|ConvertFrom-Json}else{$null}
+$assessmentId=if($summary){$summary.assessment_id}else{Split-Path -Leaf $EvidenceRoot}
+$collectedAt=if($summary){$summary.collected_at}else{'unknown'}
+$tabularCount=@($dbList|Where-Object ServerType -eq 'TABULAR').Count
+$multidimensionalCount=@($dbList|Where-Object ServerType -eq 'MULTIDIMENSIONAL').Count
 $models=@()
 foreach($d in $dbList){
   $name=$d.Database; $dir=Join-Path (Join-Path $EvidenceRoot $d.ServerType) $name
@@ -48,9 +57,10 @@ foreach($d in $dbList){
 
 # Fleet-relative category scores. Storage is based on supported USED_SIZE plus dictionary and row-count ranks.
 $metrics=@('TableCount','ColumnCount','MeasureCount','RelationshipCount','PartitionCount','UsedMB','DictionaryMB','MaxRows','DAXPatternHits')
-foreach($m in $models){
-  foreach($x in $metrics){$m|Add-Member -Force NoteProperty ("P_$x") (PercentileRank @($models.$x) $m.$x)}
-  $complex=[math]::Round(.35*$m.P_TableCount+.35*$m.P_ColumnCount+.2*$m.P_MeasureCount+.1*(PercentileRank @($models.CalculatedColumns) $m.CalculatedColumns))
+$scoredModels=@($models|Where-Object ModelType -eq 'TABULAR')
+foreach($m in $scoredModels){
+  foreach($x in $metrics){$m|Add-Member -Force NoteProperty ("P_$x") (PercentileRank @($scoredModels.$x) $m.$x)}
+  $complex=[math]::Round(.35*$m.P_TableCount+.35*$m.P_ColumnCount+.2*$m.P_MeasureCount+.1*(PercentileRank @($scoredModels.CalculatedColumns) $m.CalculatedColumns))
   $storage=[math]::Round(.45*$m.P_UsedMB+.25*$m.P_DictionaryMB+.3*$m.P_MaxRows)
   $partBase=if($m.SinglePartitionLarge){85}elseif($m.PartitionCount -gt 2*$m.TableCount){70}elseif($m.PartitionCount -eq 0){50}else{[math]::Min(55,[math]::Round($m.P_PartitionCount*.45))}
   $relationship=[math]::Round(.7*$m.P_RelationshipCount + [math]::Min(30,10*$m.BidirectionalRelationships+10*$m.ManyToManyRelationships))
@@ -59,9 +69,11 @@ foreach($m in $models){
   $overall=[math]::Round(.2222*$complex+.2778*$storage+.1667*$partBase+.1667*$relationship+.1667*$dax)
   $m|Add-Member NoteProperty ComplexityScore $complex; $m|Add-Member NoteProperty StorageScore $storage; $m|Add-Member NoteProperty PartitionScore $partBase; $m|Add-Member NoteProperty RelationshipScore $relationship; $m|Add-Member NoteProperty DAXRiskScore $dax; $m|Add-Member NoteProperty OverallScore $overall; $m|Add-Member NoteProperty RiskLevel (RiskLevel $overall); $m|Add-Member NoteProperty Priority (Pri $overall)
 }
-$ranked=@($models|Sort-Object OverallScore -Descending); $deep=@($ranked|Select-Object -First ([math]::Min(8,$ranked.Count)))
+$unscoredModels=@($models|Where-Object ModelType -ne 'TABULAR')
+foreach($m in $unscoredModels){foreach($p in @('ComplexityScore','StorageScore','PartitionScore','RelationshipScore','DAXRiskScore','OverallScore')){$m|Add-Member NoteProperty $p ''};$m|Add-Member NoteProperty RiskLevel 'INFORMATIONAL';$m|Add-Member NoteProperty Priority 'P3'}
+$ranked=@($scoredModels|Sort-Object OverallScore -Descending); $deep=@($ranked|Select-Object -First ([math]::Min(8,$ranked.Count)))
 foreach($m in $models){$m|Add-Member NoteProperty DeepDiveRecommended ($deep.Database -contains $m.Database)}
-$fleetScore=[math]::Round(($models.OverallScore|Measure-Object -Average).Average); $fleetRisk=RiskLevel $fleetScore
+$fleetScore=[math]::Round(($scoredModels.OverallScore|Measure-Object -Average).Average); $fleetRisk=RiskLevel $fleetScore
 
 $scoreHeaders='Database','ModelType','CompatibilityLevel','TableCount','ColumnCount','MeasureCount','RelationshipCount','PartitionCount','HierarchyCount','RoleCount','UsedMB','AllocatedMB','DictionaryMB','MaxRows','InactiveRelationships','BidirectionalRelationships','ManyToManyRelationships','CalculatedColumns','CalculatedTables','DAXPatternHits','OverallScore','RiskLevel','ComplexityScore','StorageScore','PartitionScore','RelationshipScore','DAXRiskScore','Priority','DeepDiveRecommended'
 $models|Select-Object $scoreHeaders|Sort-Object OverallScore -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $reportRoot '02_FLEET_SCORECARD.csv')
@@ -79,14 +91,14 @@ $findings|Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $reportRoot '0
 
 $status=$manifest|Group-Object Status|Sort-Object Name
 $coverage=@(
-  @('Database inventory','COMPLETE','All 54 selected databases are represented by manifest/database inventory.'),
+  @('Database inventory','COMPLETE',("All {0} selected databases ({1} Tabular + {2} Multidimensional) are represented by manifest/database inventory." -f $dbList.Count,$tabularCount,$multidimensionalCount)),
   @('Tabular metadata','COMPLETE','Tables, columns, measures, relationships, partitions, roles and hierarchy rowsets succeeded or succeeded empty.'),
   @('TMSL model definitions',(StatusClass $manifest 'database.tmsl.json'),'Cross-check supports model structure, expressions and compatibility analysis.'),
   @('VertiPaq storage','COMPLETE','Storage tables, columns and segments succeeded; values are DMV accounting, not object-memory model size.'),
   @('Partition statistics','UNSUPPORTED','TMSCHEMA_PARTITION_STATS was not recognized; partition row/size attribution is limited.'),
   @('Object/server memory','SKIPPED','Expensive object-memory rowset intentionally disabled; no memory-pressure conclusion is safe.'),
   @('Runtime snapshot','COMPLETE','Sessions, connections, commands and properties succeeded, but represent one collection instant.'),
-  @('Multidimensional environment','MISSING','Database discovery failed because the configured SQLMULTIDIM instance was not found; no Multidimensional health conclusion is safe.'),
+  @('Multidimensional environment',$(if($multidimensionalCount-gt0){'PARTIAL'}else{'MISSING'}),$(if($multidimensionalCount-gt0){"$multidimensionalCount Multidimensional databases are inventoried; VertiPaq/Tabular scoring is not applicable and MD-specific analysis remains separate."}else{'No Multidimensional database was inventoried; no Multidimensional health conclusion is safe.'})),
   @('Historical workload','MISSING','No query timings, FE/SE profiles, processing history, percentiles or usage telemetry.')
 )
 $top=$ranked|Select-Object -First 10
@@ -98,7 +110,7 @@ $sessions=if($runtimeDir){Csv (Join-Path $runtimeDir.FullName 'sessions.csv')}el
 $exec=@"
 # SSAS Performance Executive Assessment
 
-**Evidence set:** EVSET-001 | **Collected:** 2026-09-02 | **Fleet:** $($models.Count) Tabular databases | **Fleet risk score:** $fleetScore/100 ($fleetRisk)
+**Evidence set:** $assessmentId | **Collected:** $collectedAt | **Fleet:** $tabularCount Tabular + $multidimensionalCount Multidimensional databases | **Fleet risk score:** $fleetScore/100 ($fleetRisk)
 
 ## Overall health
 
@@ -140,7 +152,7 @@ $method=@"
 
 ## 1. Assessment Scope
 
-Evidence-driven assessment of all $($models.Count) selected Tabular databases on **BGASVR-DWH-DEV\SQLTABULAR**. The configured Multidimensional instance could not be reached, so Multidimensional coverage is MISSING rather than evidence that no such databases exist. Collection is a point-in-time snapshot dated 2026-09-02.
+Evidence-driven assessment of $tabularCount Tabular and $multidimensionalCount Multidimensional databases. Static VertiPaq scoring applies to Tabular models; Multidimensional models require MD-specific runtime, aggregation/cache, calculation, and processing analysis. Collection is a point-in-time snapshot dated $collectedAt.
 
 ## 2. Evidence Coverage
 
@@ -332,7 +344,7 @@ foreach($m in $models){
 
 ## Model Complexity
 
-Compatibility level: $($m.CompatibilityLevel). Calculated tables: $($m.CalculatedTables); calculated columns detected in TMSL: $($m.CalculatedColumns). Complexity is interpreted relative to this 54-model fleet.
+Compatibility level: $($m.CompatibilityLevel). Calculated tables: $($m.CalculatedTables); calculated columns detected in TMSL: $($m.CalculatedColumns). Complexity is interpreted relative to this $tabularCount-model Tabular fleet.
 
 ## Storage
 
