@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import ApexChart from "./ApexChart";
 import type { ApexOptions } from "apexcharts";
 import type { Candidate, ReportData } from "@/types/report";
+import Link from "next/link";
 
 const STORAGE_KEY = "ssas-assessment-custom-v3";
 const sectionLabels: Record<string, string> = {
@@ -151,7 +152,11 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
     <main>
       <aside className="rail no-print">
         <a className="brand" href="#top"><span>SA</span><b>SSAS<br/>Assessment</b></a>
-        <nav>{Object.entries(sectionLabels).map(([id, label]) => report.visibleSections[id] && <a href={`#${id}`} key={id}>{label}</a>)}</nav>
+        <nav>
+          {Object.entries(sectionLabels).map(([id, label]) => report.visibleSections[id] && <a href={`#${id}`} key={id}>{label}</a>)}
+          <Link href="/glossary">Glossary →</Link>
+          <Link href="/scoring">Scoring simulator →</Link>
+        </nav>
         <div className="rail-foot"><span className="live-dot"/> Evidence loaded</div>
       </aside>
 
