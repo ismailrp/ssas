@@ -5,7 +5,7 @@ export default function ScoringPage() {
   return <main className="min-h-screen bg-[#f6f8f5] text-[#17241f]">
     <PageNav />
     <div className="lg:ml-[210px]">
-    <header className="border-b border-[#dfe6e2] px-5 py-14 sm:px-8 lg:py-20"><div className="mx-auto max-w-7xl"><p className="text-xs font-extrabold uppercase tracking-[.2em] text-[#167d72]">Interactive example</p><h1 className="mt-4 font-[family-name:var(--font-display)] text-5xl font-extrabold tracking-[-.05em] sm:text-7xl">Scoring simulator</h1><p className="mt-5 max-w-3xl text-base leading-7 text-[#66736e]">Ubah nilai lima kategori untuk melihat weighted score, risk label, dan priority. Simulasi ini menjelaskan mekanisme prioritas relatif—bukan memprediksi latency.</p></div></header>
+    <header className="border-b border-[#dfe6e2] px-5 py-14 sm:px-8 lg:py-20"><div className="mx-auto max-w-7xl"><p className="text-xs font-extrabold uppercase tracking-[.2em] text-[#167d72]">Contoh interaktif</p><h1 className="mt-4 font-[family-name:var(--font-display)] text-5xl font-extrabold tracking-[-.05em] sm:text-7xl">Simulator scoring</h1><p className="mt-5 max-w-3xl text-base leading-7 text-[#66736e]">Ubah nilai lima kategori untuk melihat weighted score, label risiko, dan prioritas. Simulasi ini menjelaskan mekanisme prioritas relatif—bukan memprediksi latency.</p></div></header>
     <section className="mx-auto max-w-7xl px-5 pt-12 sm:px-8">
       <div className="border border-[#dfe6e2] bg-white p-6 sm:p-8">
         <p className="text-xs font-extrabold uppercase tracking-[.15em] text-[#167d72]">Asal bobot persentase</p>

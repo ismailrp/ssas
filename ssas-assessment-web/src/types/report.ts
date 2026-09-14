@@ -31,12 +31,6 @@ export type Candidate = {
   validation: string;
 };
 
-export type CustomBlock = {
-  id: string;
-  title: string;
-  body: string;
-};
-
 export type FleetModel = {
   database: string;
   modelType: "TABULAR" | "MULTIDIMENSIONAL";
@@ -83,9 +77,6 @@ export type ReportData = {
     capturedQueries: number;
     businessQueries: number;
   }>;
-  roadmap: Array<{ wave: string; focus: string; outcome: string }>;
-  validation: string[];
   fleet: FleetModel[];
-  customBlocks: CustomBlock[];
   visibleSections: Record<string, boolean>;
 };

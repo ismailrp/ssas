@@ -1,10 +1,10 @@
 {
   "meta": {
     "title": "SSAS Performance Assessment",
-    "subtitle": "Evidence-driven findings, prioritization, and implementation roadmap",
+    "subtitle": "Temuan berbasis evidence, prioritas investigasi, dan rencana validasi",
     "evidenceSet": "EVSET-005 + EVSET-005_MD / XEL-20260913",
     "assessmentDate": "13 September 2026",
-    "confidentiality": "Internal — assessment evidence may contain sensitive model metadata"
+    "confidentiality": "Internal — evidence assessment dapat memuat metadata model yang sensitif"
   },
   "summary": {
     "fleetScore": 44,
@@ -18,116 +18,98 @@
     "multidimensionalQueries": 118
   },
   "coverage": [
-    { "area": "Database inventory", "status": "COMPLETE", "note": "54 Tabular dan 2 Multidimensional terinventarisasi." },
+    { "area": "Inventaris database", "status": "COMPLETE", "note": "54 Tabular dan 2 Multidimensional terinventarisasi." },
     { "area": "Tabular metadata & storage", "status": "COMPLETE", "note": "Metadata model dan VertiPaq storage tersedia untuk ranking relatif." },
-    { "area": "Multidimensional extended metadata", "status": "COMPLETE", "note": "Partition, dimension usage, relationship, hierarchy, aggregation, dan MDX hash tersedia." },
-    { "area": "Tabular XEvent workload", "status": "PARTIAL", "note": "900 BUSINESS_CANDIDATE; business-cycle representativeness belum terbukti." },
-    { "area": "Multidimensional workload", "status": "PARTIAL", "note": "118 query seluruhnya metadata/schema discovery; tidak ada business MDX." },
-    { "area": "Processing history", "status": "MISSING", "note": "Belum ada 2–3 refresh normal dan processing event per partition." },
-    { "area": "Object usage/dependency", "status": "PARTIAL", "note": "Wajib divalidasi sebelum penghapusan atau perubahan object." },
-    { "area": "Object/server memory", "status": "SKIPPED", "note": "DMV mahal sengaja dinonaktifkan; memory pressure belum dapat disimpulkan." }
+    { "area": "Metadata lanjutan Multidimensional", "status": "COMPLETE", "note": "Partition, dimension usage, relationship, hierarchy, aggregation, dan MDX hash tersedia." },
+    { "area": "Workload XEvent Tabular", "status": "PARTIAL", "note": "900 BUSINESS_CANDIDATE terekam; representativitas business cycle belum terbukti." },
+    { "area": "Workload Multidimensional", "status": "PARTIAL", "note": "Seluruh 118 query merupakan metadata/schema discovery; tidak ada MDX bisnis." },
+    { "area": "Riwayat processing", "status": "MISSING", "note": "Belum tersedia 2–3 normal run refresh dan processing event per partition." },
+    { "area": "Penggunaan/dependency object", "status": "PARTIAL", "note": "Wajib divalidasi sebelum object dihapus atau diubah." },
+    { "area": "Memory object/server", "status": "SKIPPED", "note": "DMV berbiaya tinggi sengaja dinonaktifkan; memory pressure belum dapat disimpulkan." }
   ],
   "candidates": [
     {
-      "rank": 1, "database": "LKK", "score": 81, "risk": "CRITICAL", "priority": "P0", "status": "Runtime + structural investigation",
+      "rank": 1, "database": "LKK", "score": 81, "risk": "CRITICAL", "priority": "P0", "status": "Investigasi runtime + struktur",
       "runtimeExecutions": 213, "runtimeTotalMs": 218499, "runtimeP95Ms": 3346, "runtimeMaxMs": 39725,
       "tables": 11, "columns": 174, "measures": 35, "relationships": 11, "partitions": 11, "usedMb": 273.128, "dictionaryMb": 454.277, "maxRows": 21568293,
       "classifications": ["OBSERVED", "INFERRED", "REQUIRES VALIDATION"],
-      "signals": ["Captured runtime concentration tertinggi", "Empat tabel ≥1 juta rows dengan ≤1 partition", "Dictionary hotspot dan 48 static DAX pattern hits"],
-      "action": "Reproduce top query hashes, profile Server Timings, review cardinality/dependency, lalu pilot partition bertanggal yang non-overlap.",
-      "validation": "Semantic parity, query warm runs, 2–3 normal refresh runs, row reconciliation, dan rollback gate."
+      "signals": ["Konsentrasi runtime terekam tertinggi", "Empat tabel ≥1 juta baris dengan ≤1 partition", "Dictionary hotspot dan 48 static DAX pattern hits"],
+      "action": "Reproduksi query hash dengan total durasi tertinggi, lakukan profiling dengan Server Timings, tinjau cardinality/dependency, lalu uji coba partition bertanggal yang tidak overlap.",
+      "validation": "Semantic parity, warm run query, 2–3 normal run refresh, row reconciliation, dan rollback gate."
     },
     {
-      "rank": 2, "database": "Segregation", "score": 59, "risk": "MEDIUM", "priority": "P2", "status": "Runtime + partition validation",
+      "rank": 2, "database": "Segregation", "score": 59, "risk": "MEDIUM", "priority": "P2", "status": "Validasi runtime + partition",
       "runtimeExecutions": 157, "runtimeTotalMs": 19807, "runtimeP95Ms": 384, "runtimeMaxMs": 8186,
       "tables": 3, "columns": 72, "measures": 8, "relationships": 2, "partitions": 3, "usedMb": 21.757, "dictionaryMb": 74.284, "maxRows": 1167904,
       "classifications": ["OBSERVED", "INFERRED"],
-      "signals": ["Captured outlier hingga 8.186 ms", "Satu tabel ≥1 juta rows dengan ≤1 partition", "6 calculated columns dan 1 calculated table"],
-      "action": "Profile hash pembentuk P95/max dan capture processing events; pilot partition hanya bila date boundary valid.",
-      "validation": "Repeated query benchmark, processing before/after, reconciliation, dan rollback."
+      "signals": ["Outlier terekam hingga 8.186 ms", "Satu tabel ≥1 juta baris dengan ≤1 partition", "6 calculated column dan 1 calculated table"],
+      "action": "Lakukan profiling pada hash pembentuk P95/maksimum dan rekam processing event; uji coba partition hanya jika date boundary valid.",
+      "validation": "Benchmark query berulang, processing before/after, reconciliation, dan rollback."
     },
     {
-      "rank": 3, "database": "LKK Per Divisi", "score": 34, "risk": "MEDIUM", "priority": "P2", "status": "Runtime outlier validation",
+      "rank": 3, "database": "LKK Per Divisi", "score": 34, "risk": "MEDIUM", "priority": "P2", "status": "Validasi outlier runtime",
       "runtimeExecutions": 2, "runtimeTotalMs": 14085, "runtimeP95Ms": 14078, "runtimeMaxMs": 14078,
       "tables": 2, "columns": 43, "measures": 10, "relationships": null, "partitions": 2, "usedMb": 5.029, "dictionaryMb": 34.295, "maxRows": 154987,
       "classifications": ["OBSERVED", "REQUIRES VALIDATION"],
-      "signals": ["Satu dari dua execution mendominasi sample", "Static score hanya MEDIUM/P2", "Relationship metadata belum lengkap"],
-      "action": "Map dua hashes ke report/owner, reproduce outlier dengan warm runs, dan capture Server Timings.",
-      "validation": "Minimal tiga comparable runs; typical latency belum dapat disimpulkan dari sample saat ini."
+      "signals": ["Satu dari dua eksekusi mendominasi sampel", "Static score hanya MEDIUM/P2", "Metadata relationship belum lengkap"],
+      "action": "Petakan dua hash ke report/owner, reproduksi outlier dengan warm run, dan ambil Server Timings.",
+      "validation": "Minimal tiga run yang comparable; latency tipikal belum dapat disimpulkan dari sampel saat ini."
     },
     {
-      "rank": 4, "database": "Premi Panen", "score": 47, "risk": "MEDIUM", "priority": "P2", "status": "Workload + storage validation",
+      "rank": 4, "database": "Premi Panen", "score": 47, "risk": "MEDIUM", "priority": "P2", "status": "Validasi workload + storage",
       "runtimeExecutions": 163, "runtimeTotalMs": 3723, "runtimeP95Ms": 79, "runtimeMaxMs": 167,
       "tables": 8, "columns": 113, "measures": 0, "relationships": 7, "partitions": 8, "usedMb": 23.009, "dictionaryMb": 58.506, "maxRows": 684490,
       "classifications": ["OBSERVED", "INFERRED"],
-      "signals": ["129 distinct hashes pada 163 executions", "6 calculated columns", "Satu SELECT * dan satu complex source"],
-      "action": "Map hashes ke report, review calculated-column dependency dan explicit source projection.",
-      "validation": "Dependency scan, semantic tests, serta query/processing before-after."
+      "signals": ["129 hash berbeda pada 163 eksekusi", "6 calculated column", "Satu SELECT * dan satu source query kompleks"],
+      "action": "Petakan hash ke report, tinjau dependency calculated column dan explicit source projection.",
+      "validation": "Dependency scan, semantic test, serta query/processing before/after."
     },
     {
-      "rank": 5, "database": "Produksi TBS", "score": 82, "risk": "CRITICAL", "priority": "P0", "status": "Structural investigation",
+      "rank": 5, "database": "Produksi TBS", "score": 82, "risk": "CRITICAL", "priority": "P0", "status": "Investigasi struktur",
       "runtimeExecutions": 0, "runtimeTotalMs": 0, "runtimeP95Ms": null, "runtimeMaxMs": null,
       "tables": 18, "columns": 167, "measures": 65, "relationships": 20, "partitions": 18, "usedMb": 93.406, "dictionaryMb": 58.448, "maxRows": 8878506,
       "classifications": ["OBSERVED", "INFERRED", "REQUIRES VALIDATION"],
-      "signals": ["Static score tertinggi", "Empat fact ≥1 juta rows dengan ≤1 partition", "Bidirectional indicator, 5 SELECT *, 10 complex sources"],
-      "action": "Capture business workload dan processing per fact sebelum partition, relationship, source, atau DAX change.",
-      "validation": "Runtime baseline, partition boundary parity, processing metrics, and semantic regression."
+      "signals": ["Static score tertinggi", "Empat fact table ≥1 juta baris dengan ≤1 partition", "Indikator bidirectional, 5 SELECT *, dan 10 source query kompleks"],
+      "action": "Rekam workload bisnis dan processing per fact table sebelum mengubah partition, relationship, source query, atau DAX.",
+      "validation": "Runtime baseline, partition boundary parity, metrik processing, dan semantic regression."
     },
     {
-      "rank": 6, "database": "SPARTA_LHA_ENHC", "score": 78, "risk": "HIGH", "priority": "P1", "status": "Storage + partition investigation",
+      "rank": 6, "database": "SPARTA_LHA_ENHC", "score": 78, "risk": "HIGH", "priority": "P1", "status": "Investigasi storage + partition",
       "runtimeExecutions": 0, "runtimeTotalMs": 0, "runtimeP95Ms": null, "runtimeMaxMs": null,
       "tables": 16, "columns": 166, "measures": 30, "relationships": 17, "partitions": 16, "usedMb": 108.371, "dictionaryMb": 267.046, "maxRows": 3732958,
       "classifications": ["OBSERVED", "INFERRED"],
-      "signals": ["Dua tabel ≥1 juta rows dengan ≤1 partition", "Dictionary hotspot PROPORSI_TK", "Runtime business baseline belum tersedia"],
-      "action": "Collect workload/processing, validate cardinality and dependency, then pilot partition only when boundaries are proven.",
-      "validation": "Size/cardinality, query and processing benchmark, semantic parity, rollback."
+      "signals": ["Dua tabel ≥1 juta baris dengan ≤1 partition", "Dictionary hotspot PROPORSI_TK", "Baseline runtime bisnis belum tersedia"],
+      "action": "Kumpulkan workload/processing, validasi cardinality dan dependency, lalu uji coba partition hanya setelah boundary terbukti valid.",
+      "validation": "Ukuran/cardinality, benchmark query dan processing, semantic parity, serta rollback."
     },
     {
-      "rank": 7, "database": "premi dan lembur monitoring", "score": 72, "risk": "HIGH", "priority": "P1", "status": "Storage + runtime investigation",
+      "rank": 7, "database": "premi dan lembur monitoring", "score": 72, "risk": "HIGH", "priority": "P1", "status": "Investigasi storage + runtime",
       "runtimeExecutions": 14, "runtimeTotalMs": 1946, "runtimeP95Ms": 1835, "runtimeMaxMs": 1835,
       "tables": 13, "columns": 177, "measures": 35, "relationships": 20, "partitions": 13, "usedMb": 174.922, "dictionaryMb": 269.579, "maxRows": 14976234,
       "classifications": ["OBSERVED", "INFERRED", "REQUIRES VALIDATION"],
-      "signals": ["Satu observation mendominasi captured subset", "Dua tabel ≥1 juta rows dengan ≤1 partition", "Storage dan dictionary concentration"],
-      "action": "Reproduce outlier, capture processing/boundaries, and review cardinality plus source complexity.",
-      "validation": "Repeated query, 2–3 refresh runs, partition row reconciliation, rollback."
+      "signals": ["Satu observasi mendominasi subset yang terekam", "Dua tabel ≥1 juta baris dengan ≤1 partition", "Konsentrasi storage dan dictionary"],
+      "action": "Reproduksi outlier, rekam processing/boundary, lalu tinjau cardinality dan kompleksitas source query.",
+      "validation": "Query berulang, 2–3 refresh run, partition row reconciliation, dan rollback."
     },
     {
-      "rank": 8, "database": "MRData", "score": 71, "risk": "HIGH", "priority": "P1", "status": "Relationship investigation",
+      "rank": 8, "database": "MRData", "score": 71, "risk": "HIGH", "priority": "P1", "status": "Investigasi relationship",
       "runtimeExecutions": 87, "runtimeTotalMs": 948, "runtimeP95Ms": 33, "runtimeMaxMs": 41,
       "tables": 18, "columns": 202, "measures": 10, "relationships": 45, "partitions": 18, "usedMb": 44.939, "dictionaryMb": 128.536, "maxRows": 988487,
       "classifications": ["OBSERVED", "REQUIRES VALIDATION"],
-      "signals": ["Relationship count tertinggi di kandidat", "Satu bidirectional indicator", "Captured runtime representativeness belum terbukti"],
-      "action": "Diagram relationship/RLS path, validate bidirectional need, and profile complex filter paths.",
-      "validation": "Filter-path queries, relationship parity, Server Timings, and rollback."
+      "signals": ["Jumlah relationship tertinggi di antara kandidat", "Satu indikator bidirectional", "Representativitas runtime yang terekam belum terbukti"],
+      "action": "Petakan jalur relationship/RLS, validasi kebutuhan bidirectional, dan lakukan profiling pada jalur filter yang kompleks.",
+      "validation": "Query untuk jalur filter, relationship parity, Server Timings, dan rollback."
     }
   ],
   "multidimensional": [
     { "database": "Cube Sparta LHA", "score": 67, "risk": "HIGH", "priority": "P1", "partitions": 1, "attributes": 49, "runtimeCoverage": "METADATA_ONLY", "capturedQueries": 51, "businessQueries": 0 },
     { "database": "MultidimensionalProjectMR", "score": 50, "risk": "MEDIUM", "priority": "P2", "partitions": 2, "attributes": 7, "runtimeCoverage": "METADATA_ONLY", "capturedQueries": 67, "businessQueries": 0 }
   ],
-  "roadmap": [
-    { "wave": "01 — Establish baseline", "focus": "Query ownership, representative warm runs, 2–3 normal refresh runs, processing events", "outcome": "Comparable baseline and accepted success criteria" },
-    { "wave": "02 — Low-risk tuning", "focus": "Explicit projection, measured source fixes, dependency-approved storage hygiene", "outcome": "Reduced transfer/model width with semantic parity" },
-    { "wave": "03 — Structural pilots", "focus": "Partition, relationship, aggregation, and measured DAX/MDX changes", "outcome": "Validated improvement with rollback evidence" },
-    { "wave": "04 — Production rollout", "focus": "Controlled deployment, monitoring, governance, and evidence refresh", "outcome": "Sustained result without correctness regression" }
-  ],
-  "validation": [
-    "Use 3–5 representative business queries per candidate: one warm-up and at least three comparable warm runs.",
-    "Use 2–3 normal refresh/processing runs before and after an approved tuning change.",
-    "Record database, query hash/name, cache mode, total/FE/SE metrics when available, partition, rows, status, and errors.",
-    "Require semantic-result parity, row reconciliation, downstream validation, and an executable rollback plan.",
-    "Do not treat missing, skipped, or unsupported evidence as a performance defect."
-  ],
-  "customBlocks": [],
   "visibleSections": {
     "overview": true,
     "coverage": true,
     "charts": true,
-    "fleet": true,
     "candidates": true,
-    "multidimensional": true,
-    "roadmap": true,
-    "validation": true,
-    "custom": true
+    "multidimensional": true
   }
 }
