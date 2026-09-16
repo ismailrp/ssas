@@ -20,7 +20,7 @@ export default function FindingsPage() {
     <PageNav />
     <div className="lg:ml-[210px]">
       <header className="bg-gradient-to-br from-[#123d37] to-[#187064] px-5 py-16 text-white sm:px-8 lg:py-24">
-        <div className="mx-auto max-w-7xl"><p className="text-xs font-extrabold uppercase tracking-[.2em] text-[#9ed1c7]">Dokumen temuan</p><h1 className="mt-4 max-w-4xl font-[family-name:var(--font-display)] text-5xl font-extrabold tracking-[-.05em] sm:text-7xl">SSAS findings DOCX</h1><p className="mt-6 max-w-2xl text-base leading-7 text-[#cce1dc]">Dokumen findings yang dapat diunduh dan diedit. Setiap rekomendasi tetap memerlukan validasi sebelum perubahan diterapkan.</p></div>
+        <div className="mx-auto max-w-7xl"><p className="text-xs font-extrabold uppercase tracking-[.2em] text-[#9ed1c7]">Dokumen temuan</p><h1 className="mt-4 max-w-4xl font-[family-name:var(--font-display)] text-5xl font-extrabold tracking-[-.05em] sm:text-7xl">Dokumen temuan SSAS</h1><p className="mt-6 max-w-2xl text-base leading-7 text-[#cce1dc]">Dokumen dapat diunduh dan diedit. Setiap rekomendasi tetap harus divalidasi sebelum perubahan diterapkan.</p></div>
       </header>
       <section className="mx-auto max-w-7xl px-5 py-12 sm:px-8 lg:py-16">
         <div className="mb-7 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-extrabold uppercase tracking-[.15em] text-[#167d72]">Daftar file</p><h2 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-extrabold">{files.length} dokumen tersedia</h2></div><p className="max-w-xl text-xs leading-6 text-[#66736e]">File berlabel CONTOH PENGISIAN berisi angka ilustratif dan bukan hasil pengukuran aktual.</p></div>

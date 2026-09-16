@@ -3,9 +3,9 @@ import Link from "next/link";
 const links = [
   ["/", "Assessment"],
   ["/fleet", "Daftar seluruh model"],
-  ["/findings", "Dokumen findings"],
+  ["/findings", "Dokumen temuan"],
   ["/glossary", "Glosarium"],
-  ["/scoring", "Simulator scoring"],
+  ["/scoring", "Simulator score"],
 ];
 
 export default function PageNav() {

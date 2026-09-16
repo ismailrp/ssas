@@ -6,12 +6,13 @@ import type { ApexOptions } from "apexcharts";
 import type { Candidate, ReportData } from "@/types/report";
 import Link from "next/link";
 
-const STORAGE_KEY = "ssas-assessment-custom-v5";
+const STORAGE_KEY = "ssas-assessment-custom-v7";
 const sectionLabels: Record<string, string> = {
-  overview: "Ringkasan eksekutif",
-  coverage: "Cakupan evidence",
+  overview: "Executive summary",
+  coverage: "Evidence coverage",
+  methodology: "Metode perhitungan score",
   charts: "Analisis visual",
-  candidates: "Kandidat deep dive",
+  candidates: "Model prioritas",
   multidimensional: "Multidimensional",
 };
 
@@ -59,7 +60,7 @@ function CandidateCard({ item, displayRank }: { item: Candidate; displayRank: nu
         <div><span>P95 / maksimum</span><strong>{item.runtimeP95Ms === null ? "Belum tersedia" : `${formatMs(item.runtimeP95Ms)} / ${formatMs(item.runtimeMaxMs)}`}</strong></div>
         <div><span>Model</span><strong>{item.tables} tabel · {item.columns} kolom · {item.measures} measure</strong></div>
       </div>
-      <div className="signals"><p className="eyebrow">Sinyal lintas evidence</p><ul>{item.signals.map((signal) => <li key={signal}>{signal}</li>)}</ul></div>
+      <div className="signals"><p className="eyebrow">Sinyal dari berbagai evidence</p><ul>{item.signals.map((signal) => <li key={signal}>{signal}</li>)}</ul></div>
       <div className="action-box"><p><b>Tindakan.</b> {item.action}</p><p><b>Validasi.</b> {item.validation}</p></div>
     </article>
   );
@@ -129,9 +130,9 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
           {Object.entries(sectionLabels).map(([id, label]) => report.visibleSections[id] && <a href={`#${id}`} key={id}>{label}</a>)}
           <a href="#timeline">Timeline tuning</a>
           <Link href="/fleet">Daftar seluruh model →</Link>
-          <Link href="/findings">Dokumen findings →</Link>
+          <Link href="/findings">Dokumen temuan →</Link>
           <Link href="/glossary">Glosarium →</Link>
-          <Link href="/scoring">Simulator scoring →</Link>
+          <Link href="/scoring">Simulator score →</Link>
         </nav>
         <div className="rail-foot"><span className="live-dot"/> Evidence tersedia</div>
       </aside>
@@ -143,31 +144,45 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
         </header>
 
         {report.visibleSections.overview && <section id="overview" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">01 · Ringkasan eksekutif</p><h2>Prioritas struktural, bukan kesimpulan performa.</h2></div><p className="section-note">Static score memandu urutan investigasi. Root cause tetap memerlukan workload dan processing evidence yang comparable.</p></div>
+          <div className="section-title"><div><p className="eyebrow">01 · Executive summary</p><h2>Hasil assessment ini sudah dapat digunakan untuk menentukan prioritas peningkatan performa.</h2></div><p className="section-note">Static score memberikan dasar yang terukur untuk memilih model dan area yang perlu ditindaklanjuti lebih dahulu, mencakup kompleksitas model, storage, partition, relationship, dan pola DAX. Tahap berikutnya dapat difokuskan pada validasi penyebab utama menggunakan workload yang representatif dan data processing dalam kondisi yang sebanding.</p></div>
           <div className="metric-grid">
-            <Metric label="Risiko fleet" value={`${report.summary.fleetScore}/100`} note={`${report.summary.fleetRisk} · static score relatif terhadap fleet`} tone="orange" />
+            <Metric label="Risiko seluruh model" value={`${report.summary.fleetScore}/100`} note={`${report.summary.fleetRisk} · static score relatif terhadap seluruh model`} tone="orange" />
             <Metric label="Model yang dinilai" value={`${report.summary.tabularDatabases + report.summary.multidimensionalDatabases}`} note={`${report.summary.tabularDatabases} Tabular · ${report.summary.multidimensionalDatabases} Multidimensional`} />
             <Metric label="Query bisnis terekam" value={formatNumber(report.summary.capturedBusinessQueries)} note="Query Tabular terekam · representativitas belum terbukti" tone="blue" />
-            <Metric label="Kandidat deep dive" value={String(report.candidates.length)} note="Batas maksimum kandidat untuk tuning terkontrol" tone="ink" />
+            <Metric label="Model prioritas" value={String(report.candidates.length)} note="Model dengan gabungan sinyal paling kuat untuk ditindaklanjuti" tone="ink" />
           </div>
-          <div className="callout"><b>Batas evidence saat ini</b><span>Durasi refresh, processing bottleneck, peak concurrency, capacity pressure, dan root cause akhir <strong>NOT PROVABLE FROM CURRENT EVIDENCE</strong>.</span></div>
+          <div className="callout"><b>Batas evidence saat ini</b><span>Durasi refresh, bottleneck saat processing, peak concurrency, capacity pressure, dan root cause akhir <strong>NOT PROVABLE FROM CURRENT EVIDENCE</strong>.</span></div>
         </section>}
 
         {report.visibleSections.coverage && <section id="coverage" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">02 · Cakupan evidence</p><h2>Evidence yang tersedia, parsial, dan belum tersedia.</h2></div></div>
+          <div className="section-title"><div><p className="eyebrow">02 · Evidence coverage</p><h2>Evidence yang sudah lengkap, masih parsial, dan belum tersedia.</h2></div></div>
           <div className="coverage-list">{report.coverage.map((item) => <article key={item.area}><span className={`status status-${item.status.toLowerCase()}`}>{item.status}</span><div><h3>{item.area}</h3><p>{item.note}</p></div></article>)}</div>
         </section>}
 
+        {report.visibleSections.methodology && <section id="methodology" className="section print-page">
+          <div className="section-title"><div><p className="eyebrow">Metode perhitungan</p><h2>Score disusun dari lima aspek model yang dapat dibuktikan oleh evidence.</h2></div><p className="section-note">Setiap model dibandingkan dengan 54 model Tabular lainnya. Hasil akhirnya digunakan untuk menentukan prioritas relatif, bukan untuk menyatakan persentase kesehatan atau kecepatan model.</p></div>
+          <div className="methodology-grid">
+            <article><span>22,22%</span><h3>Complexity</h3><p>Jumlah tabel, kolom, measure, dan calculated column dibandingkan dengan seluruh model.</p></article>
+            <article><span>27,78%</span><h3>Storage</h3><p>Posisi relatif USED_SIZE, dictionary size, dan jumlah baris terbesar.</p></article>
+            <article><span>16,67%</span><h3>Partition</h3><p>Skala tabel dan pola partition, termasuk tabel besar dengan partition terbatas.</p></article>
+            <article><span>16,67%</span><h3>Relationship</h3><p>Jumlah relationship serta indikator bidirectional dan many-to-many.</p></article>
+            <article><span>16,67%</span><h3>Static DAX</h3><p>Frekuensi pola DAX yang layak diperiksa lebih lanjut; bukan bukti query lambat.</p></article>
+          </div>
+          <div className="score-formula"><div><p className="eyebrow">Formula per model</p><code>OverallScore = (Complexity × 22,22%) + (Storage × 27,78%) + (Partition × 16,67%) + (Relationship × 16,67%) + (Static DAX × 16,67%)</code></div><div><p className="eyebrow">Score lingkungan SSAS</p><strong>2.426 total score ÷ 54 model Tabular = 44,93 → 45/100</strong><p>Nilai 45 masuk kategori MEDIUM/P2 berdasarkan rentang prioritas yang digunakan assessment.</p></div></div>
+          <div className="callout"><b>Mengapa runtime tidak dihitung?</b><span>Runtime baru terekam pada sebagian database dan representativitas workload belum terbukti. Agar score tetap adil dan dapat direproduksi, bobot runtime dikeluarkan lalu lima bobot yang memiliki evidence dinormalisasi menjadi 100%.</span></div>
+          <p className="methodology-link"><Link href="/scoring">Buka simulator score untuk melihat contoh perhitungannya →</Link></p>
+        </section>}
+
         {report.visibleSections.charts && <section id="charts" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">03 · Analisis visual</p><h2>Paparan risiko dan distribusi prioritas.</h2></div></div>
+          <div className="section-title"><div><p className="eyebrow">03 · Analisis visual</p><h2>Score risiko dan distribusi prioritas.</h2></div></div>
           <div className="chart-grid">
-            <article className="chart-card chart-wide"><div><h3>Static risk score</h3><p>Diurutkan dari static score tertinggi; berbeda dari urutan gabungan kandidat deep dive.</p></div><ApexChart type="bar" series={[{ name: "Score", data: scoreCandidates.map((c) => c.score) }]} options={scoreOptions} height={365}/></article>
-            <article className="chart-card chart-wide"><div><h3>Distribusi prioritas model</h3><p>Jumlah seluruh model dalam fleet berdasarkan prioritas P0-P3; prioritas adalah alat triase relatif, bukan bukti defect.</p></div><ApexChart type="bar" series={[{ name: "Jumlah model", data: priorityCounts }]} options={priorityOptions} height={315}/></article>
+            <article className="chart-card chart-wide"><div><h3>Static risk score</h3><p>Diurutkan dari static score tertinggi. Urutan ini dapat berbeda dari daftar model prioritas yang menggunakan gabungan sinyal.</p></div><ApexChart type="bar" series={[{ name: "Score", data: scoreCandidates.map((c) => c.score) }]} options={scoreOptions} height={365}/></article>
+            <article className="chart-card chart-wide"><div><h3>Distribusi prioritas model</h3><p>Jumlah model di seluruh lingkungan SSAS berdasarkan prioritas P0–P3. Prioritas digunakan untuk menentukan urutan tindak lanjut, bukan sebagai bukti adanya defect.</p></div><ApexChart type="bar" series={[{ name: "Jumlah model", data: priorityCounts }]} options={priorityOptions} height={315}/></article>
           </div>
         </section>}
 
         {report.visibleSections.candidates && <section id="candidates" className="section">
-          <div className="section-title print-page"><div><p className="eyebrow">05 · Kandidat deep dive</p><h2>Delapan jalur investigasi prioritas.</h2></div><p className="section-note">Kandidat dipilih dari kombinasi sinyal static dan runtime, lalu ditampilkan berdasarkan static score tertinggi. P0-P3 berasal dari static score dan bukan bukti defect.</p></div>
+          <div className="section-title print-page"><div><p className="eyebrow">05 · Model prioritas</p><h2>Delapan model dengan prioritas tindak lanjut tertinggi.</h2></div><p className="section-note">Model dipilih dari kombinasi sinyal static dan runtime, lalu diurutkan berdasarkan static score. P0–P3 menunjukkan urutan penanganan, bukan bukti adanya defect.</p></div>
           <div className="candidate-list">{scoreCandidates.map((item, index) => <CandidateCard item={item} displayRank={index + 1} key={item.database}/>)}</div>
         </section>}
 
@@ -177,12 +192,12 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
         </section>}
 
         <section id="timeline" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">Timeline tuning</p><h2>Rencana kerja DTSX dan model SSAS selama 20 mandays.</h2></div><p className="section-note">Estimasi berurutan untuk satu workstream. Jadwal aktual mengikuti kesiapan akses, owner, test environment, approval, dan change window.</p></div>
+          <div className="section-title"><div><p className="eyebrow">Timeline tuning</p><h2>Rencana tuning DTSX dan model SSAS selama 20 man-days.</h2></div><p className="section-note">Estimasi ini menggunakan satu workstream berurutan. Jadwal aktual menyesuaikan kesiapan akses, owner, test environment, approval, dan change window.</p></div>
           <div className="timeline-frame"><img src="/timeline-tuning-dtsx-ssas-20md.svg" alt="Gantt timeline 20 mandays untuk tuning DTSX dan model SSAS"/></div>
-          <p className="table-footnote">Tuning belum dianggap berhasil sebelum semantic regression test, benchmark before/after, SIT/UAT, dan rollback gate selesai. Aktivitas production tidak termasuk tanpa approval dan change window.</p>
+          <p className="table-footnote">Tuning baru dinyatakan berhasil setelah semantic regression test, benchmark before/after, SIT/UAT, dan rollback gate selesai. Aktivitas di production tidak termasuk tanpa approval dan change window.</p>
         </section>
 
-        <footer><span>{report.meta.evidenceSet}</span><span>Dihasilkan dari data report lokal yang dapat diedit</span></footer>
+        <footer><span>{report.meta.evidenceSet}</span><span>Dihasilkan dari data laporan lokal yang dapat diedit</span></footer>
       </div>
 
       <div className="float-actions no-print">
@@ -192,11 +207,11 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
 
       {customizeOpen && <div className="drawer-backdrop no-print" onMouseDown={(e) => e.currentTarget === e.target && setCustomizeOpen(false)}>
         <aside className="drawer">
-          <div className="drawer-head"><div><p className="eyebrow">Kontrol report</p><h2>Sesuaikan assessment</h2></div><button onClick={() => setCustomizeOpen(false)} aria-label="Tutup">×</button></div>
+          <div className="drawer-head"><div><p className="eyebrow">Pengaturan laporan</p><h2>Sesuaikan assessment</h2></div><button onClick={() => setCustomizeOpen(false)} aria-label="Tutup">×</button></div>
           <div className="drawer-body">
-            <div className="control-group"><label>Judul report<input value={report.meta.title} onChange={(e) => setReport({ ...report, meta: { ...report.meta, title: e.target.value } })}/></label><label>Subjudul<textarea rows={2} value={report.meta.subtitle} onChange={(e) => setReport({ ...report, meta: { ...report.meta, subtitle: e.target.value } })}/></label></div>
-            <div className="control-group"><h3>Section yang ditampilkan</h3>{Object.entries(sectionLabels).map(([id,label]) => <label className="switch-row" key={id}><span>{label}</span><input type="checkbox" checked={Boolean(report.visibleSections[id])} onChange={() => toggleSection(id)}/></label>)}</div>
-            <div className="control-group"><div className="json-title"><div><h3>Edit seluruh JSON report</h3><p>Tambahkan atau hapus kandidat dan baris coverage.</p></div></div><textarea className="json-editor" spellCheck={false} value={jsonDraft} onChange={(e) => setJsonDraft(e.target.value)}/>{jsonError && <p className="json-error">{jsonError}</p>}</div>
+            <div className="control-group"><label>Judul laporan<input value={report.meta.title} onChange={(e) => setReport({ ...report, meta: { ...report.meta, title: e.target.value } })}/></label><label>Subjudul<textarea rows={2} value={report.meta.subtitle} onChange={(e) => setReport({ ...report, meta: { ...report.meta, subtitle: e.target.value } })}/></label></div>
+            <div className="control-group"><h3>Bagian yang ditampilkan</h3>{Object.entries(sectionLabels).map(([id,label]) => <label className="switch-row" key={id}><span>{label}</span><input type="checkbox" checked={Boolean(report.visibleSections[id])} onChange={() => toggleSection(id)}/></label>)}</div>
+            <div className="control-group"><div className="json-title"><div><h3>Edit seluruh JSON laporan</h3><p>Tambahkan atau hapus kandidat dan baris coverage.</p></div></div><textarea className="json-editor" spellCheck={false} value={jsonDraft} onChange={(e) => setJsonDraft(e.target.value)}/>{jsonError && <p className="json-error">{jsonError}</p>}</div>
           </div>
           <div className="drawer-actions"><button onClick={reset}>Kembalikan default</button><button className="apply" onClick={applyJson}>Terapkan JSON</button></div>
         </aside>
