@@ -6,7 +6,7 @@ import type { ApexOptions } from "apexcharts";
 import type { Candidate, ReportData } from "@/types/report";
 import Link from "next/link";
 
-const STORAGE_KEY = "ssas-assessment-custom-v7";
+const STORAGE_KEY = "ssas-assessment-custom-v9";
 const sectionLabels: Record<string, string> = {
   overview: "Executive summary",
   coverage: "Evidence coverage",
@@ -27,6 +27,7 @@ const formatNumber = (value: number) => new Intl.NumberFormat("id-ID").format(va
 const formatMs = (value: number | null) => (value === null ? "Belum tersedia" : `${formatNumber(value)} ms`);
 const normalizeReport = (data: ReportData): ReportData => ({
   ...data,
+  runtimeBaseline: data.runtimeBaseline ?? [],
   candidates: [...data.candidates]
     .sort((a, b) => b.score - a.score || a.database.localeCompare(b.database))
     .map((candidate, index) => ({ ...candidate, rank: index + 1 })),
@@ -98,6 +99,22 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
     grid: { borderColor: "#e5eae7", strokeDashArray: 4 }, legend: { show: false }, tooltip: { y: { formatter: (v) => `${v}/100` } },
   }), [scoreCandidates]);
 
+  const topRuntime = useMemo(
+    () => [...report.runtimeBaseline].sort((a, b) => b.totalDurationMs - a.totalDurationMs || a.database.localeCompare(b.database)),
+    [report.runtimeBaseline],
+  );
+  const runtimeOptions: ApexOptions = useMemo(() => ({
+    chart: { toolbar: { show: false }, animations: { enabled: false }, fontFamily: "var(--font-body)" },
+    colors: ["#287f9b"],
+    plotOptions: { bar: { horizontal: true, borderRadius: 5, barHeight: "62%" } },
+    dataLabels: { enabled: true, formatter: (value) => `${formatNumber(Number(value))} ms` },
+    xaxis: { categories: topRuntime.map((item) => item.database), labels: { formatter: (value) => formatNumber(Number(value)), style: { colors: "#65716d" } }, title: { text: "Total durasi terekam (ms)" } },
+    yaxis: { labels: { maxWidth: 210, style: { colors: "#24312d", fontSize: "12px", fontWeight: 600 } } },
+    grid: { borderColor: "#e5eae7", strokeDashArray: 4 },
+    legend: { show: false },
+    tooltip: { y: { formatter: (value, context) => { const item = topRuntime[context?.dataPointIndex ?? 0]; return `${formatNumber(value)} ms total · ${formatNumber(item.executions)} eksekusi · P95 ${formatNumber(item.p95DurationMs)} ms`; } } },
+  }), [topRuntime]);
+
   const priorityLevels = ["P0", "P1", "P2", "P3"] as const;
   const priorityCounts = useMemo(
     () => priorityLevels.map((priority) => report.fleet.filter((item) => item.priority === priority).length),
@@ -160,7 +177,7 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
         </section>}
 
         {report.visibleSections.methodology && <section id="methodology" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">Metode perhitungan</p><h2>Score disusun dari lima aspek model yang dapat dibuktikan oleh evidence.</h2></div><p className="section-note">Setiap model dibandingkan dengan 54 model Tabular lainnya. Hasil akhirnya digunakan untuk menentukan prioritas relatif, bukan untuk menyatakan persentase kesehatan atau kecepatan model.</p></div>
+          <div className="section-title"><div><p className="eyebrow">03 · Metode perhitungan</p><h2>Score disusun dari lima aspek model yang dapat dibuktikan oleh evidence.</h2></div><p className="section-note">Setiap model dibandingkan dengan 54 model Tabular lainnya. Hasil akhirnya digunakan untuk menentukan prioritas relatif, bukan untuk menyatakan persentase kesehatan atau kecepatan model.</p></div>
           <div className="methodology-grid">
             <article><span>22,22%</span><h3>Complexity</h3><p>Jumlah tabel, kolom, measure, dan calculated column dibandingkan dengan seluruh model.</p></article>
             <article><span>27,78%</span><h3>Storage</h3><p>Posisi relatif USED_SIZE, dictionary size, dan jumlah baris terbesar.</p></article>
@@ -174,9 +191,10 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
         </section>}
 
         {report.visibleSections.charts && <section id="charts" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">03 · Analisis visual</p><h2>Score risiko dan distribusi prioritas.</h2></div></div>
+          <div className="section-title"><div><p className="eyebrow">04 · Analisis visual</p><h2>Score risiko dan distribusi prioritas.</h2></div></div>
           <div className="chart-grid">
             <article className="chart-card chart-wide"><div><h3>Static risk score</h3><p>Diurutkan dari static score tertinggi. Urutan ini dapat berbeda dari daftar model prioritas yang menggunakan gabungan sinyal.</p></div><ApexChart type="bar" series={[{ name: "Score", data: scoreCandidates.map((c) => c.score) }]} options={scoreOptions} height={365}/></article>
+            <article className="chart-card chart-wide"><div><h3>Top captured runtime</h3><p>Total durasi BUSINESS_CANDIDATE yang terekam per database. Nilai kumulatif dipengaruhi jumlah eksekusi dan representativitas workload belum terbukti; chart ini adalah sinyal prioritas, bukan perbandingan latency absolut.</p></div><ApexChart type="bar" series={[{ name: "Total durasi terekam", data: topRuntime.map((item) => item.totalDurationMs) }]} options={runtimeOptions} height={470}/></article>
             <article className="chart-card chart-wide"><div><h3>Distribusi prioritas model</h3><p>Jumlah model di seluruh lingkungan SSAS berdasarkan prioritas P0–P3. Prioritas digunakan untuk menentukan urutan tindak lanjut, bukan sebagai bukti adanya defect.</p></div><ApexChart type="bar" series={[{ name: "Jumlah model", data: priorityCounts }]} options={priorityOptions} height={315}/></article>
           </div>
         </section>}
@@ -187,12 +205,20 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
         </section>}
 
         {report.visibleSections.multidimensional && <section id="multidimensional" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">06 · Multidimensional</p><h2>Scoring terpisah dengan batas interpretasi yang jelas.</h2></div></div>
+          <div className="section-title"><div><p className="eyebrow">06 · Multidimensional</p><h2>Scoring terpisah untuk model multidimensional.</h2></div><p className="section-note">Setiap cube dibandingkan dengan fleet Multidimensional menggunakan kategori yang didukung evidence. Kategori yang tidak tersedia dikeluarkan dan bobot dinormalisasi.</p></div>
+          <div className="methodology-grid">
+            <article><span>01</span><h3>Structural</h3><p>Posisi relatif jumlah dimension attribute dan user-hierarchy level.</p></article>
+            <article><span>02</span><h3>Partition</h3><p>Estimated rows terbesar dan konsentrasi rows, hanya ketika estimasi rows tersedia.</p></article>
+            <article><span>03</span><h3>Relationship</h3><p>Measure-group dimension usage dan attribute relationship dibandingkan dalam fleet MD.</p></article>
+            <article><span>04</span><h3>Aggregation</h3><p>Proporsi partition tanpa aggregation design; merupakan sinyal review, bukan otomatis defect.</p></article>
+            <article><span>05</span><h3>Calculation</h3><p>Jumlah MDX calculation command secara relatif; jumlah command bukan bukti query lambat.</p></article>
+          </div>
+          <div className="callout"><b>Batas interpretasi</b><span>Score MD adalah prioritas investigasi relatif di antara dua cube, bukan ukuran latency atau kesehatan absolut. Runtime bisnis, aggregation hit rate, cache effectiveness, dan processing bottleneck masih <strong>NOT PROVABLE FROM CURRENT EVIDENCE</strong>.</span></div>
           <div className="md-grid">{report.multidimensional.map((item) => <article key={item.database}><div className="md-title"><h3>{item.database}</h3><span className={`badge risk-${item.risk.toLowerCase()}`}>{item.risk}/{item.priority}</span></div><strong>{item.score}<small>/100</small></strong><dl><div><dt>Partisi</dt><dd>{item.partitions}</dd></div><div><dt>Atribut</dt><dd>{item.attributes}</dd></div><div><dt>Query XEvent</dt><dd>{item.capturedQueries}</dd></div><div><dt>MDX bisnis</dt><dd>{item.businessQueries}</dd></div></dl><p>Cakupan runtime: <b>{item.runtimeCoverage}</b>. Durasi yang terekam berasal dari metadata discovery, bukan latency pengguna.</p></article>)}</div>
         </section>}
 
         <section id="timeline" className="section print-page">
-          <div className="section-title"><div><p className="eyebrow">Timeline tuning</p><h2>Rencana tuning DTSX dan model SSAS selama 20 man-days.</h2></div><p className="section-note">Estimasi ini menggunakan satu workstream berurutan. Jadwal aktual menyesuaikan kesiapan akses, owner, test environment, approval, dan change window.</p></div>
+          <div className="section-title"><div><p className="eyebrow">07 · Timeline tuning</p><h2>Rencana tuning DTSX dan model SSAS selama 20 man-days.</h2></div><p className="section-note">Estimasi ini menggunakan satu workstream berurutan. Jadwal aktual menyesuaikan kesiapan akses, owner, test environment, approval, dan change window.</p></div>
           <div className="timeline-frame"><img src="/timeline-tuning-dtsx-ssas-20md.svg" alt="Gantt timeline 20 mandays untuk tuning DTSX dan model SSAS"/></div>
           <p className="table-footnote">Tuning baru dinyatakan berhasil setelah semantic regression test, benchmark before/after, SIT/UAT, dan rollback gate selesai. Aktivitas di production tidak termasuk tanpa approval dan change window.</p>
         </section>

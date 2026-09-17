@@ -45,6 +45,14 @@ export type FleetModel = {
   runtimeCoverage: string;
 };
 
+export type RuntimeBaseline = {
+  database: string;
+  executions: number;
+  totalDurationMs: number;
+  p95DurationMs: number;
+  maxDurationMs: number;
+};
+
 export type ReportData = {
   meta: {
     title: string;
@@ -66,6 +74,7 @@ export type ReportData = {
   };
   coverage: Coverage[];
   candidates: Candidate[];
+  runtimeBaseline: RuntimeBaseline[];
   multidimensional: Array<{
     database: string;
     score: number;

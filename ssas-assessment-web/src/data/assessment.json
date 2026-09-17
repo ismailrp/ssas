@@ -101,9 +101,24 @@
       "validation": "Query untuk jalur filter, relationship parity, Server Timings, dan rollback."
     }
   ],
+  "runtimeBaseline": [
+    { "database": "LKK", "executions": 213, "totalDurationMs": 218499, "p95DurationMs": 3346, "maxDurationMs": 39725 },
+    { "database": "Segregation", "executions": 157, "totalDurationMs": 19807, "p95DurationMs": 384, "maxDurationMs": 8186 },
+    { "database": "LKK Per Divisi", "executions": 2, "totalDurationMs": 14085, "p95DurationMs": 14078, "maxDurationMs": 14078 },
+    { "database": "Premi Panen", "executions": 163, "totalDurationMs": 3723, "p95DurationMs": 79, "maxDurationMs": 167 },
+    { "database": "Saldo Treasury", "executions": 10, "totalDurationMs": 3484, "p95DurationMs": 439, "maxDurationMs": 439 },
+    { "database": "premi dan lembur monitoring", "executions": 14, "totalDurationMs": 1946, "p95DurationMs": 1835, "maxDurationMs": 1835 },
+    { "database": "LkkPhase2", "executions": 103, "totalDurationMs": 1345, "p95DurationMs": 47, "maxDurationMs": 77 },
+    { "database": "BiayaUmum", "executions": 14, "totalDurationMs": 1122, "p95DurationMs": 605, "maxDurationMs": 605 },
+    { "database": "Actual vs Anggaran", "executions": 100, "totalDurationMs": 1020, "p95DurationMs": 21, "maxDurationMs": 28 },
+    { "database": "MRData", "executions": 87, "totalDurationMs": 948, "p95DurationMs": 33, "maxDurationMs": 41 },
+    { "database": "LemburMill", "executions": 29, "totalDurationMs": 368, "p95DurationMs": 39, "maxDurationMs": 40 },
+    { "database": "JournalPayroll", "executions": 7, "totalDurationMs": 136, "p95DurationMs": 54, "maxDurationMs": 54 },
+    { "database": "KriteriaGaji", "executions": 1, "totalDurationMs": 17, "p95DurationMs": 17, "maxDurationMs": 17 }
+  ],
   "multidimensional": [
-    { "database": "Cube Sparta LHA", "score": 67, "risk": "HIGH", "priority": "P1", "partitions": 1, "attributes": 49, "runtimeCoverage": "METADATA_ONLY", "capturedQueries": 51, "businessQueries": 0 },
-    { "database": "MultidimensionalProjectMR", "score": 50, "risk": "MEDIUM", "priority": "P2", "partitions": 2, "attributes": 7, "runtimeCoverage": "METADATA_ONLY", "capturedQueries": 67, "businessQueries": 0 }
+    { "database": "Cube Sparta LHA", "score": 81, "risk": "CRITICAL", "priority": "P0", "partitions": 1, "attributes": 49, "runtimeCoverage": "METADATA_ONLY", "capturedQueries": 51, "businessQueries": 0 },
+    { "database": "MultidimensionalProjectMR", "score": 44, "risk": "MEDIUM", "priority": "P2", "partitions": 2, "attributes": 7, "runtimeCoverage": "METADATA_ONLY", "capturedQueries": 67, "businessQueries": 0 }
   ],
   "visibleSections": {
     "overview": true,

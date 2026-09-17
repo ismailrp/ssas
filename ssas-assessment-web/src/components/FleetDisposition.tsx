@@ -41,7 +41,7 @@ export default function FleetDisposition({ fleet, evidenceSet }: { fleet: FleetM
 
       <div className="report-shell" id="top">
         <section id="fleet" className="section fleet-page">
-          <div className="section-title"><div><p className="eyebrow">04 · Daftar seluruh model</p><h2>Seluruh {fleet.length} model tetap tercakup dalam assessment.</h2></div><p className="section-note">Status model prioritas menunjukkan urutan tindak lanjut, bukan membatasi model yang dinilai. Watchlist dan monitoring tetap berjalan sampai sinyal runtime atau dampak bisnis menunjukkan perlunya peningkatan prioritas.</p></div>
+          <div className="section-title"><div><p className="eyebrow">Lampiran · Daftar seluruh model</p><h2>Seluruh {fleet.length} model tetap tercakup dalam assessment.</h2></div><p className="section-note">Status model prioritas menunjukkan urutan tindak lanjut, bukan membatasi model yang dinilai. Watchlist dan monitoring tetap berjalan sampai sinyal runtime atau dampak bisnis menunjukkan perlunya peningkatan prioritas.</p></div>
           <div className="disposition-grid print-avoid">
             <button className={fleetFilter === "ALL" ? "active" : ""} onClick={() => setFleetFilter("ALL")}><strong>{fleet.length}</strong><span>Semua model</span></button>
             <button className={fleetFilter === "DEEP_DIVE" ? "active" : ""} onClick={() => setFleetFilter("DEEP_DIVE")}><strong>{dispositionCounts.DEEP_DIVE}</strong><span>Model prioritas</span></button>
