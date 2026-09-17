@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Generates one editable DOCX finding report per SSAS deep-dive database.
+Generates one editable DOCX finding report per database represented in the SSAS findings list.
 
 .DESCRIPTION
 Uses the supplied SSIS DOCX only as an OpenXML style/template container. All
@@ -172,7 +172,12 @@ $runtime=@()
 $runtimePath=Join-Path $ReportRoot '07_RUNTIME_DATABASE_BASELINE.csv'
 if (Test-Path -LiteralPath $runtimePath) { $runtime=@(Import-Csv -LiteralPath $runtimePath) }
 $deepDiveText=Get-Content -LiteralPath (Join-Path $ReportRoot '06_DEEP_DIVE_PLAN.md')
-$databases=@($deepDiveText | Where-Object {$_ -match '^## (.+)$'} | ForEach-Object {$matches[1]})
+$deepDiveDatabases=@($deepDiveText | Where-Object {$_ -match '^## (.+)$'} | ForEach-Object {$matches[1]})
+$findingDatabases=@($findings.Database | Where-Object {$_} | Sort-Object -Unique)
+$remainingDatabases=@($scorecard | Where-Object {
+    $findingDatabases -contains $_.Database -and $deepDiveDatabases -notcontains $_.Database
+} | Sort-Object {[double]$_.OverallScore} -Descending | ForEach-Object {$_.Database})
+$databases=@($deepDiveDatabases + $remainingDatabases | Select-Object -Unique)
 
 $indexRows=New-Object Collections.Generic.List[object]
 $number=0

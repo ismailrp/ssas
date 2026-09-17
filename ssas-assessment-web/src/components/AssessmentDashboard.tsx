@@ -138,6 +138,10 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
     catch (error) { setJsonError(error instanceof Error ? error.message : "JSON tidak valid"); }
   };
   const reset = () => { setReport(normalizedInitial); setJsonDraft(JSON.stringify(normalizedInitial, null, 2)); localStorage.removeItem(STORAGE_KEY); setJsonError(""); };
+  const printReport = () => {
+    window.dispatchEvent(new Event("resize"));
+    window.setTimeout(() => window.print(), 250);
+  };
 
   return (
     <main>
@@ -228,7 +232,7 @@ export default function AssessmentDashboard({ initialData }: { initialData: Repo
 
       <div className="float-actions no-print">
         <button className="float-btn secondary" onClick={() => { setJsonDraft(JSON.stringify(report, null, 2)); setCustomizeOpen(true); }} aria-label="Sesuaikan report"><EditIcon/><span>Sesuaikan</span></button>
-        <button className="float-btn primary" onClick={() => window.print()} aria-label="Ekspor PDF A4"><PrintIcon/><span>Ekspor PDF · A4</span></button>
+        <button className="float-btn primary" onClick={printReport} aria-label="Ekspor PDF A4"><PrintIcon/><span>Ekspor PDF · A4</span></button>
       </div>
 
       {customizeOpen && <div className="drawer-backdrop no-print" onMouseDown={(e) => e.currentTarget === e.target && setCustomizeOpen(false)}>
